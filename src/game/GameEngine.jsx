@@ -8,6 +8,7 @@ import {
     updatePlayerPosition,
 } from "./Player"
 import { useGameLoop } from "./useGameLoop"
+import backgroundImg from "/src/assets/background.png"
 import playerBike from "/src/assets/player.png"
 
 extend({ Graphics, Container, Sprite: PixiSprite })
@@ -61,6 +62,7 @@ function accumulateCurve(road, from, to) {
 
 export default function GameEngine() {
     const [playerTexture, setPlayerTexture] = useState(null)
+    const [backgroundTexture, setBackgroundTexture] = useState(null)
     const [playerState, setPlayerState] = useState(createPlayerState)
     const [scrollPos, setScrollPos] = useState(0)
     const [isAccelerating, setIsAccelerating] = useState(false)
@@ -74,6 +76,9 @@ export default function GameEngine() {
         let isMounted = true
         Assets.load(playerBike).then((texture) => {
             if (isMounted) setPlayerTexture(texture)
+        })
+        Assets.load(backgroundImg).then((texture) => {
+            if (isMounted) setBackgroundTexture(texture)
         })
         return () => {
             isMounted = false
@@ -218,10 +223,6 @@ export default function GameEngine() {
             const screenW = window.innerWidth
             const screenH = window.innerHeight
 
-            // Ciel
-            g.rect(0, 0, screenW, HORIZON)
-            g.fill({ color: 0x9fd9f6 })
-
             // Sol/herbe
             g.rect(0, HORIZON, screenW, screenH - HORIZON)
             g.fill({ color: ROAD_SIDE_COLOR })
@@ -267,6 +268,7 @@ export default function GameEngine() {
                 const DASH_GROUP = DASH_INTERVAL_SEGMENTS + DASH_LENGTH_SEGMENTS
                 const dashOffset =
                     (DASH_GROUP - ((scrollPos / 2) % DASH_GROUP)) % DASH_GROUP
+
                 for (let lane = 1; lane < PLAYER_LANES; lane++) {
                     const dashPos = (i + dashOffset) % DASH_GROUP
                     if (dashPos < DASH_LENGTH_SEGMENTS && t1 > 0.05) {
@@ -278,6 +280,35 @@ export default function GameEngine() {
                         g.lineTo(x2 + lane * laneWidth2, y2)
                         g.closePath()
                         g.fill({ color: 0xffffff })
+                    }
+                }
+
+                // Traces de pneus ultra soft/floues façon Road Rash
+                for (let lane = 0; lane < PLAYER_LANES; lane++) {
+                    // Centre de la lane en bas et en haut du segment
+                    const laneCenter1 =
+                        x1 + ((lane + 0.5) * roadW1) / PLAYER_LANES
+                    const laneCenter2 =
+                        x2 + ((lane + 0.5) * roadW2) / PLAYER_LANES
+
+                    // Largeur fixe (pas de perspective) ~35 px, ajustable
+                    const SKID_WIDTH = 36
+
+                    // 3 à 4 couches très floues, très peu opaques
+                    for (let blur = 0; blur < 4; blur++) {
+                        const blurAlpha = [0.07, 0.045, 0.028, 0.015][blur]
+                        const blurExtra = blur * 11
+
+                        g.moveTo(laneCenter1 - SKID_WIDTH / 2 - blurExtra, y1)
+                        g.lineTo(laneCenter1 + SKID_WIDTH / 2 + blurExtra, y1)
+                        g.lineTo(laneCenter2 + SKID_WIDTH / 2 + blurExtra, y2)
+                        g.lineTo(laneCenter2 - SKID_WIDTH / 2 - blurExtra, y2)
+                        g.closePath()
+                        g.fill({
+                            // Gris bleuté asphalte usé
+                            color: 0x333333,
+                            alpha: blurAlpha,
+                        })
                     }
                 }
 
@@ -425,9 +456,19 @@ export default function GameEngine() {
         <Application
             width={window.innerWidth}
             height={window.innerHeight}
-            background={0x87ceeb}
+            background={0x000000}
         >
             <container>
+                {/* Background */}
+                {backgroundTexture && (
+                    <sprite
+                        texture={backgroundTexture}
+                        width={window.innerWidth}
+                        height={window.innerHeight}
+                        x={0}
+                        y={0}
+                    />
+                )}
                 <graphics draw={draw} />
                 <PlayerOnRoad />
             </container>
