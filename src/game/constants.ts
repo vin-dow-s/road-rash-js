@@ -49,3 +49,7 @@ export const MOTO_COLORS = [0xff0000, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff]
 export const TREE_COLOR = 0x117700
 export const ROCK_COLOR = 0x888888
 export const BUILDING_COLOR = 0x915621
+
+// Couleurs pour les segments de terrain en perspective
+export const TERRAIN_FAR_COLOR = 0x1e7a1e // Vert foncé pour l'horizon
+export const TERRAIN_FIELD_COLOR = 0x2d8a2d // Vert légèrement différent pour les champs

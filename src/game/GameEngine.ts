@@ -4,6 +4,7 @@ import {
     Container,
     Graphics,
     Sprite,
+    Text,
     Texture,
     Ticker,
 } from "pixi.js"
@@ -32,6 +33,8 @@ import {
     ROCK_COLOR,
     RUMBLE_LENGTH,
     SEGMENT_LENGTH,
+    TERRAIN_FAR_COLOR,
+    TERRAIN_FIELD_COLOR,
     TREE_COLOR,
 } from "./constants"
 import {
@@ -211,6 +214,11 @@ export class PixiRoadRashEngine {
 
     private finished: boolean = false
 
+    // Textes de victoire
+    private victoryText: Text | null = null
+    private restartText: Text | null = null
+    private pauseText: Text | null = null
+
     // Lissage de la caméra pour réduire les saccades
     private cameraSmoothing = {
         targetX: 0,
@@ -300,6 +308,47 @@ export class PixiRoadRashEngine {
             root.addChild(this.playerSprite)
         }
 
+        // Textes de victoire (cachés par défaut)
+        this.victoryText = new Text({
+            text: "END!",
+            style: {
+                fontFamily: "Arial Black",
+                fontSize: 48,
+                fill: 0xffffff,
+                align: "center",
+            },
+        })
+        this.victoryText.anchor.set(0.5)
+        this.victoryText.visible = false
+        root.addChild(this.victoryText)
+
+        this.restartText = new Text({
+            text: "Press R to restart",
+            style: {
+                fontFamily: "Arial",
+                fontSize: 24,
+                fill: 0x333333,
+                align: "center",
+            },
+        })
+        this.restartText.anchor.set(0.5)
+        this.restartText.visible = false
+        root.addChild(this.restartText)
+
+        // Texte de pause (caché par défaut)
+        this.pauseText = new Text({
+            text: "PAUSE",
+            style: {
+                fontFamily: "Arial Black",
+                fontSize: 64,
+                fill: 0xffffff,
+                align: "center",
+            },
+        })
+        this.pauseText.anchor.set(0.5)
+        this.pauseText.visible = false
+        root.addChild(this.pauseText)
+
         // Décor aléatoire
         this.sceneryItems = []
         for (let i = 0; i < 80; i++) {
@@ -339,8 +388,37 @@ export class PixiRoadRashEngine {
         }
     }
 
+    private restart() {
+        // Remettre tous les paramètres à zéro
+        this.finished = false
+        this.paused = false
+        this.speed = ROAD_SPEED
+        this.scrollPos = 0
+        this.isAccelerating = false
+        this.isBraking = false
+        this.enemies = []
+        this.lastEnemySpawn = 0
+
+        // Remettre le joueur à sa position initiale
+        this.player = createPlayerState()
+
+        // Remettre la caméra à zéro
+        this.cameraSmoothing.targetX = 0
+        this.cameraSmoothing.currentX = 0
+
+        // Cacher les textes de victoire
+        if (this.victoryText) this.victoryText.visible = false
+        if (this.restartText) this.restartText.visible = false
+    }
+
     private handleKeyDown = (e: KeyboardEvent) => {
-        if (this.finished) return
+        if (this.finished) {
+            // Permettre le redémarrage avec R
+            if (e.key === "r" || e.key === "R") {
+                this.restart()
+            }
+            return
+        }
         if (e.key === " " || e.key === "p" || e.key === "P") {
             this.paused = !this.paused
             return
@@ -457,7 +535,7 @@ export class PixiRoadRashEngine {
         dx = 0
         let maxy = screenH
 
-        // Sol/herbe
+        // Sol/herbe de base (sera recouvert par les segments de terrain)
         g.rect(0, HORIZON, screenW, screenH - HORIZON)
         g.fill({ color: ROAD_SIDE_COLOR })
 
@@ -626,7 +704,166 @@ export class PixiRoadRashEngine {
                 }
             }
 
+            // Lignes grises foncées au centre de chaque lane
+            if (segment.p1.screen.w > 30) {
+                const laneWidth1 = (2 * segment.p1.screen.w) / PLAYER_LANES
+                const laneWidth2 = (2 * segment.p2.screen.w) / PLAYER_LANES
+
+                for (let lane = 0; lane < PLAYER_LANES; lane++) {
+                    // Position du centre de chaque lane
+                    const laneCenterX1 =
+                        segment.p1.screen.x -
+                        segment.p1.screen.w +
+                        (lane + 0.5) * laneWidth1
+                    const laneCenterX2 =
+                        segment.p2.screen.x -
+                        segment.p2.screen.w +
+                        (lane + 0.5) * laneWidth2
+
+                    // Largeur de la ligne grise élargie et plus subtile (12x plus large)
+                    const baseLineWidth = Math.max(
+                        36,
+                        Math.min(96, laneWidth1 * 0.96)
+                    )
+
+                    // Réduction progressive de la largeur vers l'horizon
+                    const distanceFactor = Math.max(
+                        0.2,
+                        1 -
+                            segment.p1.camera.z /
+                                (DRAW_DISTANCE * SEGMENT_LENGTH * 0.5)
+                    )
+                    const lineWidth = baseLineWidth * distanceFactor
+
+                    // Effet de flou avec plus de couches superposées pour un meilleur dégradé
+                    for (let i = 0; i < 5; i++) {
+                        const blurWidth = lineWidth * (1 - i * 0.15) // Réduction plus progressive de la largeur
+                        const alpha = 0.08 * Math.pow(0.8, i) // Décroissance exponentielle de l'opacité
+
+                        g.moveTo(
+                            laneCenterX1 - blurWidth / 2,
+                            segment.p1.screen.y
+                        )
+                        g.lineTo(
+                            laneCenterX1 + blurWidth / 2,
+                            segment.p1.screen.y
+                        )
+                        g.lineTo(
+                            laneCenterX2 + (blurWidth * distanceFactor) / 2,
+                            segment.p2.screen.y
+                        )
+                        g.lineTo(
+                            laneCenterX2 - (blurWidth * distanceFactor) / 2,
+                            segment.p2.screen.y
+                        )
+                        g.closePath()
+                        g.fill({ color: 0x404040, alpha }) // Gris plus clair avec transparence progressive
+                    }
+                }
+            }
+
+            // Affichage du FINISH sur le dernier segment
+            if (segmentIndex >= this.road.length - 2) {
+                const width = segment.p1.screen.w * 1.5
+                const height = width * 0.2
+
+                // Rectangle blanc de base (avec ombre)
+                g.rect(
+                    segment.p1.screen.x - width / 2 + 4,
+                    segment.p1.screen.y - height * 1.5 + 4,
+                    width,
+                    height
+                )
+                g.fill({ color: 0x000000, alpha: 0.5 }) // Ombre
+
+                // Rectangle blanc de base
+                g.rect(
+                    segment.p1.screen.x - width / 2,
+                    segment.p1.screen.y - height * 1.5,
+                    width,
+                    height
+                )
+                g.fill({ color: 0xffffff })
+
+                // Rectangle rouge plus petit par dessus
+                g.rect(
+                    segment.p1.screen.x - width / 2 + 4,
+                    segment.p1.screen.y - height * 1.5 + 4,
+                    width - 8,
+                    height - 8
+                )
+                g.fill({ color: 0xff0000 })
+
+                // Rectangle blanc central pour l'effet
+                g.rect(
+                    segment.p1.screen.x - width / 3,
+                    segment.p1.screen.y - height * 1.5 + 4,
+                    width / 1.5,
+                    height - 8
+                )
+                g.fill({ color: 0xffffff, alpha: 0.7 })
+            }
+
             maxy = Math.min(maxy, segment.p2.screen.y)
+        }
+
+        // Segments de terrain en perspective (style Road Rash)
+        // Redessiner les segments visibles avec extension du terrain latéral
+        for (let n = 0; n < visibleSegments; n++) {
+            const segmentIndex = baseSegmentIndex + n
+            if (segmentIndex >= this.road.length) break
+            const segment = this.road[segmentIndex]
+
+            if (
+                segment.p1.camera.z <= 0 ||
+                segment.p2.screen.y >= maxy ||
+                segment.p1.screen.w <= 0
+            )
+                continue
+
+            // Terrain latéral avec perspective (extension de la route vers l'horizon)
+            const terrainWidth = segment.p1.screen.w * 4 // 4x plus large que la route pour plus d'immersion
+
+            // Variation de couleur basée sur la distance et position pour plus de réalisme
+            const distanceFactor = Math.min(
+                1,
+                segment.p1.camera.z / (DRAW_DISTANCE * SEGMENT_LENGTH * 0.3)
+            )
+
+            // Alternance de couleurs pour simuler des champs différents
+            const fieldVariation = Math.floor(segmentIndex / 8) % 3
+            let terrainColor = ROAD_SIDE_COLOR
+
+            if (distanceFactor > 0.8) {
+                terrainColor = TERRAIN_FAR_COLOR // Très loin = vert foncé
+            } else if (distanceFactor > 0.4) {
+                terrainColor =
+                    fieldVariation === 0 ? TERRAIN_FIELD_COLOR : ROAD_SIDE_COLOR // Champs alternés
+            }
+
+            // Terrain gauche
+            g.moveTo(0, segment.p1.screen.y)
+            g.lineTo(segment.p1.screen.x - terrainWidth, segment.p1.screen.y)
+            g.lineTo(
+                segment.p2.screen.x -
+                    terrainWidth * (segment.p2.screen.w / segment.p1.screen.w),
+                segment.p2.screen.y
+            )
+            g.lineTo(0, segment.p2.screen.y)
+            g.closePath()
+            g.fill({ color: terrainColor })
+
+            // Terrain droit
+            g.moveTo(segment.p1.screen.x + terrainWidth, segment.p1.screen.y)
+            g.lineTo(screenW, segment.p1.screen.y)
+            g.lineTo(screenW, segment.p2.screen.y)
+            g.lineTo(
+                segment.p2.screen.x +
+                    terrainWidth * (segment.p2.screen.w / segment.p1.screen.w),
+                segment.p2.screen.y
+            )
+            g.closePath()
+            g.fill({ color: terrainColor })
         }
 
         // Patch cassure horizon
@@ -646,14 +883,15 @@ export class PixiRoadRashEngine {
             const dz = worldZ - this.scrollPos
             if (dz < 0 || dz > DRAW_DISTANCE * SEGMENT_LENGTH) return
 
-            // Décalage latéral (hors de la route)
+            // Décalage latéral (bien plus loin de la route)
             const roadX = getRoadCurveOffsetDelta(
                 this.road,
                 this.scrollPos,
                 worldZ
             )
             const offset =
-                (item.side === "left" ? -1 : 1) * (ROAD_WIDTH / 2 + item.offset)
+                (item.side === "left" ? -1 : 1) *
+                (ROAD_WIDTH / 2 + item.offset + 300)
 
             // Projection : on projette le point à la position exacte du décor !
             const point: Point = {
@@ -681,17 +919,19 @@ export class PixiRoadRashEngine {
                 const t = dz / (DRAW_DISTANCE * SEGMENT_LENGTH)
                 const scale = 0.35 + 0.7 * (1 - t)
                 if (item.type === "tree") {
+                    // Tronc 3x plus gros
                     g.rect(
-                        point.screen.x - 10 * scale,
-                        point.screen.y - 60 * scale,
-                        20 * scale,
-                        60 * scale
+                        point.screen.x - 30 * scale,
+                        point.screen.y - 180 * scale,
+                        60 * scale,
+                        180 * scale
                     )
                     g.fill({ color: 0x8b4513 })
+                    // Feuillage 3x plus gros
                     g.circle(
                         point.screen.x,
-                        point.screen.y - 60 * scale,
-                        35 * scale
+                        point.screen.y - 180 * scale,
+                        105 * scale
                     )
                     g.fill({ color: TREE_COLOR })
                 } else if (item.type === "rock") {
@@ -736,11 +976,59 @@ export class PixiRoadRashEngine {
         g.rect(18, 21, gaugeWidth * pulseScale, 3)
         g.fill({ color: 0xffffff, alpha: 0.4 })
 
+        // Ombre du joueur
+        if (this.playerSprite) {
+            const shadowX = this.player.x + PLAYER_WIDTH / 2
+            const shadowY = this.player.y + PLAYER_HEIGHT * 0.9
+
+            // Ellipse d'ombre floue
+            g.ellipse(shadowX, shadowY, PLAYER_WIDTH / 5, PLAYER_HEIGHT * 0.1)
+            g.fill({ color: 0x000000, alpha: 0.3 }) // Noir semi-transparent
+        }
+
         // Player sprite (centré)
         if (this.playerSprite) {
             this.playerSprite.x = this.player.x + PLAYER_WIDTH / 2
             this.playerSprite.y = this.player.y + PLAYER_HEIGHT / 2
             this.playerSprite.rotation = this.player.rotation
+        }
+
+        // Écran de victoire quand le jeu est terminé
+        if (this.finished) {
+            // Fond semi-transparent
+            g.rect(0, 0, screenW, screenH)
+            g.fill({ color: 0x000000, alpha: 0.8 })
+
+            // Rectangle principal simple
+            const boxWidth = 400
+            const boxHeight = 200
+            const boxX = (screenW - boxWidth) / 2
+            const boxY = (screenH - boxHeight) / 2
+
+            // Rectangle de victoire simple
+            g.rect(boxX, boxY, boxWidth, boxHeight)
+            g.fill({ color: 0xffffff })
+
+            // Bordure
+            g.rect(boxX + 5, boxY + 5, boxWidth - 10, boxHeight - 10)
+            g.fill({ color: 0x00aa00 })
+
+            // Afficher et positionner les textes
+            if (this.victoryText) {
+                this.victoryText.visible = true
+                this.victoryText.x = screenW / 2
+                this.victoryText.y = boxY + 80
+            }
+
+            if (this.restartText) {
+                this.restartText.visible = true
+                this.restartText.x = screenW / 2
+                this.restartText.y = boxY + 140
+            }
+        } else {
+            // Cacher les textes quand le jeu n'est pas terminé
+            if (this.victoryText) this.victoryText.visible = false
+            if (this.restartText) this.restartText.visible = false
         }
     }
 
