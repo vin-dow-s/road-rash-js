@@ -1,10 +1,10 @@
 import React from "react"
-import GameEngine from "./game/GameEngine"
+import GameCanvas from "./components/GameCanvas"
 
 function App() {
     return (
         <div className="w-screen h-screen overflow-hidden">
-            <GameEngine />
+            <GameCanvas />
         </div>
     )
 }
