@@ -13,25 +13,25 @@ export const PLAYER_Z = CAMERA_HEIGHT * 1.0 // profondeur du joueur derrière la
 // --- ROUTE & SEGMENTS ---
 export const DRAW_DISTANCE = 60 // nombre de segments à dessiner
 export const SEGMENT_LENGTH = 250 // longueur d'un segment (en px ou logique)
-export const ROAD_WIDTH = 2000 // largeur de la route (utilisée partout)
+export const ROAD_WIDTH = 1700 // largeur de la route (utilisée partout)
 export const ROAD_MIN_WIDTH = 150 // largeur minimale visuelle à l'horizon
-export const ROAD_MAX_WIDTH = 2000 // largeur max visuelle proche joueur
+export const ROAD_MAX_WIDTH = 1700 // largeur max visuelle proche joueur
 export const RUMBLE_LENGTH = 3 // nombre de segments entre chaque bordure
 export const LANE_COUNT = 3 // nombre de voies pour le joueur
 
-export const CURVE_SCALE = 900 // facteur d'intensité des virages (affichage)
+export const CURVE_SCALE = 400 // facteur d'intensité des virages (affichage)
 
 // --- GAMEPLAY & PHYSIQUE ---
-export const MAX_SPEED = SEGMENT_LENGTH / STEP / 7 // vitesse max (un segment par frame max)
-export const ACCELERATION = MAX_SPEED // accélération (ressenti arcade)
-export const BRAKE = MAX_SPEED // frein
-export const OFF_ROAD_DECEL = -MAX_SPEED / 2 // décélération hors route
-export const OFF_ROAD_LIMIT = MAX_SPEED / 4 // vitesse max hors route
-export const ROAD_SPEED = 450 // vitesse de croisière (base, peut être utile pour IA/ennemis)
+export const MAX_SPEED = SEGMENT_LENGTH / STEP // vitesse max multipliée par 4 pour sensation Road Rash extrême
+export const ACCELERATION = MAX_SPEED // accélération progressive mais puissante
+export const BRAKE = MAX_SPEED * 1.8 // frein plus efficace
+export const OFF_ROAD_DECEL = -MAX_SPEED / 1.5 // décélération hors route plus forte
+export const OFF_ROAD_LIMIT = MAX_SPEED / 3 // vitesse max hors route
+export const ROAD_SPEED = 7500 // vitesse de croisière plus élevée pour sensation de vitesse
 
 // --- ENNEMIS / AUTRES ---
-export const MAX_ENEMIES = 2
-export const ENEMY_SPAWN_RATE = 2.8
+export const MAX_ENEMIES = 4 // Plus d'ennemis pour plus d'action
+export const ENEMY_SPAWN_RATE = 1.8 // Spawn plus fréquent des ennemis
 
 // --- COULEURS ---
 export const ROAD_COLOR = 0x4d4d4d

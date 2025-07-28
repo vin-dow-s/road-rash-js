@@ -169,6 +169,23 @@ function getRoadCurveOffsetDelta(road: Segment[], fromZ: number, toZ: number) {
     return x
 }
 
+// Fonction pour interpoler en douceur entre les courbes des segments
+function getInterpolatedCurve(road: Segment[], z: number) {
+    const segmentIndex = Math.floor(z / SEGMENT_LENGTH)
+    const segmentProgress = (z % SEGMENT_LENGTH) / SEGMENT_LENGTH
+
+    if (segmentIndex >= road.length - 1) {
+        return road[road.length - 1].curve
+    }
+
+    const currentSegment = road[segmentIndex]
+    const nextSegment = road[segmentIndex + 1]
+
+    // Interpolation en cosinus pour une transition plus douce
+    const t = (1 - Math.cos(segmentProgress * Math.PI)) / 2
+    return currentSegment.curve * (1 - t) + nextSegment.curve * t
+}
+
 export class PixiRoadRashEngine {
     private app: Application | null = null
     private container: HTMLElement | null = null
@@ -193,6 +210,13 @@ export class PixiRoadRashEngine {
     private playerTexture: Texture | null = null
 
     private finished: boolean = false
+
+    // Lissage de la caméra pour réduire les saccades
+    private cameraSmoothing = {
+        targetX: 0,
+        currentX: 0,
+        smoothFactor: 0.15,
+    }
 
     constructor() {
         this.player = createPlayerState()
@@ -374,12 +398,12 @@ export class PixiRoadRashEngine {
         ) {
             this.enemies.push({
                 id: Date.now() + Math.random(),
-                z: 0.13,
+                z: 0.08 + Math.random() * 0.1, // Position de spawn plus variée
                 lane: Math.floor(Math.random() * 3) - 1,
                 color: MOTO_COLORS[
                     Math.floor(Math.random() * MOTO_COLORS.length)
                 ],
-                speed: (0.55 + Math.random() * 0.45) * speedFactor,
+                speed: (0.7 + Math.random() * 0.6) * speedFactor, // Vitesse des ennemis plus élevée et variable
             })
             this.lastEnemySpawn = 0
         }
@@ -388,7 +412,9 @@ export class PixiRoadRashEngine {
                 ...enemy,
                 z: enemy.z + enemy.speed * deltaTime,
             }))
-            .filter((enemy) => enemy.z < 1.22)
+            .filter((enemy) => enemy.z < 1.4) // Distance plus éloignée pour voir les ennemis plus longtemps
+
+        this.lastEnemySpawn += deltaTime
 
         this.draw()
     }
@@ -404,12 +430,31 @@ export class PixiRoadRashEngine {
         const playerRoadX =
             (2 * (this.player.x + PLAYER_WIDTH / 2 - screenW / 2)) / ROAD_WIDTH
 
-        // 3D setup
+        // 3D setup avec lissage de caméra
         const cameraDepth = 1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
         const camZ = this.scrollPos + PLAYER_Z
         const baseSegmentIndex = Math.floor(this.scrollPos / SEGMENT_LENGTH)
-        let x = 0
+
+        // Calculer la position target de la caméra basée sur les courbes à venir
+        let targetCameraX = 0
         let dx = 0
+        for (let i = 0; i < 3; i++) {
+            // Regarder 3 segments devant
+            const segIdx = baseSegmentIndex + i
+            if (segIdx < this.road.length) {
+                targetCameraX += dx
+                dx += this.road[segIdx].curve * 50 // Facteur d'anticipation
+            }
+        }
+
+        // Lissage temporel de la caméra
+        this.cameraSmoothing.targetX = targetCameraX
+        this.cameraSmoothing.currentX +=
+            (this.cameraSmoothing.targetX - this.cameraSmoothing.currentX) *
+            this.cameraSmoothing.smoothFactor
+
+        let x = -this.cameraSmoothing.currentX // Offset lissé de la caméra
+        dx = 0
         let maxy = screenH
 
         // Sol/herbe
@@ -418,12 +463,16 @@ export class PixiRoadRashEngine {
 
         let visibleSegments = 0
 
+        // Position fractionnaire dans le segment actuel pour l'interpolation
+        const currentSegmentProgress =
+            (this.scrollPos % SEGMENT_LENGTH) / SEGMENT_LENGTH
+
         for (let n = 0; n < DRAW_DISTANCE; n++) {
             const segmentIndex = baseSegmentIndex + n
             if (segmentIndex >= this.road.length) break
             const segment = this.road[segmentIndex]
 
-            // Virage accumulé
+            // Virage accumulé avec interpolation douce
             segment.p1.world.x = x
             segment.p2.world.x = x + dx
 
@@ -450,7 +499,22 @@ export class PixiRoadRashEngine {
             )
 
             x += dx
-            dx += segment.curve
+
+            // Application progressive de la courbe avec interpolation
+            if (n === 0) {
+                // Pour le premier segment, appliquer seulement la partie restante
+                dx += segment.curve * (1 - currentSegmentProgress)
+            } else {
+                // Pour les autres segments, interpoler entre la courbe actuelle et la suivante
+                let currentCurve = segment.curve
+                if (segmentIndex + 1 < this.road.length) {
+                    const nextCurve = this.road[segmentIndex + 1].curve
+                    // Transition en cosinus pour plus de fluidité
+                    const t = 0.3 // Facteur de lissage
+                    currentCurve = currentCurve * (1 - t) + nextCurve * t
+                }
+                dx += currentCurve
+            }
 
             if (
                 segment.p1.camera.z <= 0 ||
@@ -521,25 +585,42 @@ export class PixiRoadRashEngine {
             g.closePath()
             g.fill({ color: BORDER_COLOR })
 
-            // Pointillés centraux
-            if (
-                segment.index %
-                    (DASH_INTERVAL_SEGMENTS + DASH_LENGTH_SEGMENTS) <
-                DASH_LENGTH_SEGMENTS
-            ) {
-                const laneW1 = segment.p1.screen.w / PLAYER_LANES
-                const laneW2 = segment.p2.screen.w / PLAYER_LANES
-                for (let lane = 1; lane < PLAYER_LANES; lane++) {
-                    const x1 =
+            // Pointillés des lanes (3 lanes avec rectangles animés)
+            const DASH_GROUP = DASH_INTERVAL_SEGMENTS + DASH_LENGTH_SEGMENTS
+
+            // Calculer la position absolue des pointillés basée sur la position Z du segment
+            const segmentWorldZ = segment.p1.world.z
+            const dashCycle = (segmentWorldZ / SEGMENT_LENGTH) % DASH_GROUP
+            const isDashVisible = dashCycle < DASH_LENGTH_SEGMENTS
+
+            for (let lane = 1; lane < PLAYER_LANES; lane++) {
+                // 2 lignes de pointillés pour 3 lanes
+                if (isDashVisible && segment.p1.screen.w > 50) {
+                    // segment.p1.screen.w est la demi-largeur, donc largeur complète = 2 * w
+                    const laneWidth1 = (2 * segment.p1.screen.w) / PLAYER_LANES
+                    const laneWidth2 = (2 * segment.p2.screen.w) / PLAYER_LANES
+
+                    // Position X du centre de la lane
+                    const laneX1 =
                         segment.p1.screen.x -
                         segment.p1.screen.w +
-                        lane * laneW1
-                    const x2 =
+                        lane * laneWidth1
+                    const laneX2 =
                         segment.p2.screen.x -
                         segment.p2.screen.w +
-                        lane * laneW2
-                    g.moveTo(x1, segment.p1.screen.y)
-                    g.lineTo(x2, segment.p2.screen.y)
+                        lane * laneWidth2
+
+                    // Largeur des pointillés proportionnelle à la taille de la lane
+                    const dashWidth = Math.max(
+                        3,
+                        Math.min(12, laneWidth1 * 0.15)
+                    )
+
+                    // Rectangle de pointillé
+                    g.moveTo(laneX1 - dashWidth / 2, segment.p1.screen.y)
+                    g.lineTo(laneX1 + dashWidth / 2, segment.p1.screen.y)
+                    g.lineTo(laneX2 + dashWidth / 2, segment.p2.screen.y)
+                    g.lineTo(laneX2 - dashWidth / 2, segment.p2.screen.y)
                     g.closePath()
                     g.fill({ color: 0xffffff })
                 }
