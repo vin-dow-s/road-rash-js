@@ -6,12 +6,12 @@ export const WIDTH = window.innerWidth // largeur logique du canvas
 export const HEIGHT = window.innerHeight
 export const HORIZON = HEIGHT * 0.47 // position verticale de l'horizon
 
-export const FIELD_OF_VIEW = 100 // angle du FOV en degrés (inutile si tu restes en 2.5D)
+export const FIELD_OF_VIEW = 100 // angle du FOV en degrés (utile si jamais 3d)
 export const CAMERA_HEIGHT = 1000 // hauteur de la caméra au-dessus de la route
 export const PLAYER_Z = CAMERA_HEIGHT * 1.0 // profondeur du joueur derrière la caméra
 
 // --- ROUTE & SEGMENTS ---
-export const DRAW_DISTANCE = 40 // nombre de segments à dessiner
+export const DRAW_DISTANCE = 60 // nombre de segments à dessiner
 export const SEGMENT_LENGTH = 250 // longueur d'un segment (en px ou logique)
 export const ROAD_WIDTH = 2000 // largeur de la route (utilisée partout)
 export const ROAD_MIN_WIDTH = 150 // largeur minimale visuelle à l'horizon
