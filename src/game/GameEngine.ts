@@ -154,6 +154,21 @@ function getRoadCurveOffset(road: Segment[], z: number) {
     return x
 }
 
+function getRoadCurveOffsetDelta(road: Segment[], fromZ: number, toZ: number) {
+    // fromZ et toZ sont les positions Z du scroll caméra et du décor
+    let x = 0
+    let dx = 0
+    const fromIndex = Math.floor(fromZ / SEGMENT_LENGTH)
+    const toIndex = Math.floor(toZ / SEGMENT_LENGTH)
+
+    for (let i = fromIndex; i < toIndex; i++) {
+        const s = road[i % road.length]
+        x += dx
+        dx += s.curve
+    }
+    return x
+}
+
 export class PixiRoadRashEngine {
     private app: Application | null = null
     private container: HTMLElement | null = null
@@ -403,7 +418,6 @@ export class PixiRoadRashEngine {
 
         let visibleSegments = 0
 
-        // ⚠️ PLUS DE MODULO !
         for (let n = 0; n < DRAW_DISTANCE; n++) {
             const segmentIndex = baseSegmentIndex + n
             if (segmentIndex >= this.road.length) break
@@ -552,7 +566,11 @@ export class PixiRoadRashEngine {
             if (dz < 0 || dz > DRAW_DISTANCE * SEGMENT_LENGTH) return
 
             // Décalage latéral (hors de la route)
-            const roadX = getRoadCurveOffset(this.road, worldZ)
+            const roadX = getRoadCurveOffsetDelta(
+                this.road,
+                this.scrollPos,
+                worldZ
+            )
             const offset =
                 (item.side === "left" ? -1 : 1) * (ROAD_WIDTH / 2 + item.offset)
 
