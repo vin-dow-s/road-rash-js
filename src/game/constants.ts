@@ -11,7 +11,7 @@ export const CAMERA_HEIGHT = 1000 // hauteur de la caméra au-dessus de la route
 export const PLAYER_Z = CAMERA_HEIGHT * 1.0 // profondeur du joueur derrière la caméra
 
 // --- ROUTE & SEGMENTS ---
-export const DRAW_DISTANCE = 60 // nombre de segments à dessiner
+export const DRAW_DISTANCE = 300 // distance de vue augmentée (2x plus loin)
 export const SEGMENT_LENGTH = 250 // longueur d'un segment (en px ou logique)
 export const ROAD_WIDTH = 1700 // largeur de la route (utilisée partout)
 export const ROAD_MIN_WIDTH = 150 // largeur minimale visuelle à l'horizon
@@ -20,6 +20,55 @@ export const RUMBLE_LENGTH = 3 // nombre de segments entre chaque bordure
 export const LANE_COUNT = 3 // nombre de voies pour le joueur
 
 export const CURVE_SCALE = 400 // facteur d'intensité des virages (affichage)
+export const CENTRIFUGAL_FORCE = 0.15 // force centrifuge dans les virages (réduite de moitié)
+
+// --- PERSPECTIVE & BROUILLARD ---
+export const FOG_DENSITY = 8 // densité du brouillard pour l'effet de distance
+export const HORIZON_FADE_START = 5 // à partir de quelle distance commencer le fondu vers l'horizon
+export const ROAD_HORIZON_COLOR = 0x87ceeb // couleur de la route à l'horizon (bleu ciel)
+export const MIN_SEGMENT_WIDTH = 2 // largeur minimale des segments à l'horizon
+
+// --- DÉCOR & BORDURES ---
+export const SCENERY_SCALE_RANGE = {
+    MIN: 0.05, // Taille minimale au loin
+    MAX: 3.0, // Taille maximale hors écran
+    PLAYER_LEVEL: 0.9, // Taille au niveau du joueur (80% de la taille max)
+    CURVE: 2, // Courbe de progression
+} // échelle min/max des éléments de décor
+
+export const DIRT_BORDER = {
+    COLOR: 0x5c3c24, // marron foncé pour la terre
+    WIDTH_FACTOR: 0.4, // 40% de la largeur de la bordure principale
+    ALPHA: 0.6, // légère transparence pour l'effet flou
+}
+
+// --- CONTRÔLES JOUEUR ---
+export const PLAYER_MOVE_SPEED = 0.1 // vitesse de déplacement latéral (plus lent)
+export const PLAYER_BOUNDS_FACTOR = 0.85 // limite les déplacements à 85% de la largeur de la route
+
+// --- INCLINAISON JOUEUR ---
+export const PLAYER_TILT_MAX = 0.2 // inclinaison maximale en radians (~11.5 degrés)
+export const PLAYER_TILT_SPRING = 10 // vitesse de retour à la position neutre (plus rapide)
+export const PLAYER_TILT_CURVE_RESPONSE = 1.2 // sensibilité aux virages (plus réactif)
+export const PLAYER_LOOK_AHEAD_SEGMENTS = 6 // moins de segments pour une réponse plus directe
+
+// --- CONSTANTES POUR LA GÉNÉRATION DE ROUTE (méthode Jake Gordon) ---
+export const ROAD = {
+    LENGTH: {
+        NONE: 0,
+        SHORT: 25,
+        MEDIUM: 50,
+        LONG: 100,
+        VERY_LONG: 200,
+    },
+    CURVE: {
+        NONE: 0,
+        EASY: 2,
+        MEDIUM: 4,
+        HARD: 6,
+        EXTREME: 8,
+    },
+}
 
 // --- GAMEPLAY & PHYSIQUE ---
 export const MAX_SPEED = SEGMENT_LENGTH / STEP // vitesse max multipliée par 4 pour sensation Road Rash extrême

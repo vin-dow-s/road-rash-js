@@ -15,8 +15,10 @@ import {
     BRAKE,
     BUILDING_COLOR,
     CAMERA_HEIGHT,
+    CENTRIFUGAL_FORCE,
     DASH_INTERVAL_SEGMENTS,
     DASH_LENGTH_SEGMENTS,
+    DIRT_BORDER,
     DRAW_DISTANCE,
     ENEMY_SPAWN_RATE,
     FIELD_OF_VIEW,
@@ -25,13 +27,20 @@ import {
     MAX_SPEED,
     MOTO_COLORS,
     PLAYER_LANES,
+    PLAYER_LOOK_AHEAD_SEGMENTS,
+    PLAYER_MOVE_SPEED,
+    PLAYER_TILT_CURVE_RESPONSE,
+    PLAYER_TILT_MAX,
+    PLAYER_TILT_SPRING,
     PLAYER_Z,
+    ROAD,
     ROAD_COLOR,
     ROAD_SIDE_COLOR,
     ROAD_SPEED,
     ROAD_WIDTH,
     ROCK_COLOR,
     RUMBLE_LENGTH,
+    SCENERY_SCALE_RANGE,
     SEGMENT_LENGTH,
     TERRAIN_FAR_COLOR,
     TERRAIN_FIELD_COLOR,
@@ -75,6 +84,20 @@ interface Enemy {
     speed: number
 }
 
+// --- FONCTIONS D'EASING POUR LES COURBES (méthode Jake Gordon) ---
+function easeIn(a: number, b: number, percent: number): number {
+    return a + (b - a) * Math.pow(percent, 2)
+}
+
+function easeOut(a: number, b: number, percent: number): number {
+    return a + (b - a) * (1 - Math.pow(1 - percent, 2))
+}
+
+function easeInOut(a: number, b: number, percent: number): number {
+    return a + (b - a) * (-Math.cos(percent * Math.PI) / 2 + 0.5)
+}
+
+// --- GÉNÉRATION DE ROUTE À LA JAKE GORDON ---
 function buildRoadSegments(): Segment[] {
     const segments: Segment[] = []
     const segmentLength = SEGMENT_LENGTH
@@ -100,12 +123,187 @@ function buildRoadSegments(): Segment[] {
         })
     }
 
-    // Ajoute des virages façon Jake
-    for (let i = 0; i < 50; i++) addSegment(0)
-    for (let i = 0; i < 50; i++) addSegment(2) // virage à droite
-    for (let i = 0; i < 50; i++) addSegment(0)
-    for (let i = 0; i < 50; i++) addSegment(-2) // virage à gauche
-    for (let i = 0; i < 50; i++) addSegment(0)
+    // Fonction pour ajouter une section de route avec easing (comme Jake Gordon)
+    function addRoad(
+        enter: number,
+        hold: number,
+        leave: number,
+        curve: number
+    ) {
+        let n: number
+        for (n = 0; n < enter; n++) {
+            addSegment(easeIn(0, curve, n / enter))
+        }
+        for (n = 0; n < hold; n++) {
+            addSegment(curve)
+        }
+        for (n = 0; n < leave; n++) {
+            addSegment(easeInOut(curve, 0, n / leave))
+        }
+    }
+
+    // Fonctions d'aide pour différents types de sections
+    function addStraight(num?: number) {
+        num = num || ROAD.LENGTH.MEDIUM
+        addRoad(num, num, num, 0)
+    }
+
+    function addCurve(num?: number, curve?: number) {
+        num = num || ROAD.LENGTH.MEDIUM
+        curve = curve || ROAD.CURVE.MEDIUM
+        addRoad(num, num, num, curve)
+    }
+
+    function addSCurves() {
+        addRoad(
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            -ROAD.CURVE.EASY
+        )
+        addRoad(
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.CURVE.MEDIUM
+        )
+        addRoad(
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.CURVE.EASY
+        )
+        addRoad(
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            -ROAD.CURVE.EASY
+        )
+        addRoad(
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            ROAD.LENGTH.MEDIUM,
+            -ROAD.CURVE.MEDIUM
+        )
+    }
+
+    function addBigSCurves() {
+        addRoad(
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            -ROAD.CURVE.MEDIUM
+        )
+        addRoad(
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.CURVE.HARD
+        )
+        addRoad(
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.CURVE.MEDIUM
+        )
+        addRoad(
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            -ROAD.CURVE.HARD
+        )
+        addRoad(
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            ROAD.LENGTH.LONG,
+            -ROAD.CURVE.EASY
+        )
+    }
+
+    function addChicanes() {
+        addRoad(
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            ROAD.CURVE.HARD
+        )
+        addRoad(
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            -ROAD.CURVE.HARD
+        )
+        addRoad(
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            ROAD.CURVE.MEDIUM
+        )
+        addRoad(
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            ROAD.LENGTH.SHORT,
+            -ROAD.CURVE.MEDIUM
+        )
+    }
+
+    // --- CONSTRUCTION DE LA ROUTE LONGUE ET VARIÉE ---
+    // Départ avec une ligne droite
+    addStraight(ROAD.LENGTH.SHORT / 4)
+
+    // Section 1: Introduction progressive
+    addSCurves()
+    addStraight(ROAD.LENGTH.LONG)
+    addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EASY)
+    addStraight(ROAD.LENGTH.MEDIUM)
+
+    // Section 2: Montée en difficulté
+    addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.MEDIUM)
+    addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.MEDIUM)
+    addStraight(ROAD.LENGTH.VERY_LONG)
+    addBigSCurves()
+
+    // Section 3: Chicanes rapides
+    addStraight(ROAD.LENGTH.LONG)
+    addChicanes()
+    addStraight(ROAD.LENGTH.MEDIUM)
+    addChicanes()
+
+    // Section 4: Courbes longues et fluides
+    addStraight(ROAD.LENGTH.LONG)
+    addCurve(ROAD.LENGTH.VERY_LONG, ROAD.CURVE.EASY)
+    addCurve(ROAD.LENGTH.VERY_LONG, -ROAD.CURVE.EASY)
+    addStraight(ROAD.LENGTH.LONG)
+
+    // Section 5: Mix complexe
+    addSCurves()
+    addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.HARD)
+    addStraight(ROAD.LENGTH.MEDIUM)
+    addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.HARD)
+    addBigSCurves()
+
+    // Section 6: Courbes extrêmes
+    addStraight(ROAD.LENGTH.VERY_LONG)
+    addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EXTREME)
+    addStraight(ROAD.LENGTH.SHORT)
+    addCurve(ROAD.LENGTH.MEDIUM, -ROAD.CURVE.EXTREME)
+    addStraight(ROAD.LENGTH.LONG)
+
+    // Section 7: Finale technique
+    addChicanes()
+    addSCurves()
+    addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.MEDIUM)
+    addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.MEDIUM)
+    addStraight(ROAD.LENGTH.VERY_LONG)
+
+    // Section 8: Sprint final
+    addBigSCurves()
+    addStraight(ROAD.LENGTH.VERY_LONG)
+    addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EASY)
+    addStraight(ROAD.LENGTH.LONG)
+
+    // Ligne d'arrivée
+    addStraight(ROAD.LENGTH.MEDIUM)
 
     return segments
 }
@@ -203,6 +401,7 @@ export class PixiRoadRashEngine {
     private sceneryItems: SceneryItem[] = []
     private enemies: Enemy[] = []
     private lastEnemySpawn: number = 0
+    private currentTilt: number = 0 // Nouvelle propriété pour suivre l'inclinaison
 
     private road = buildRoadSegments()
     private backgroundSprite: Sprite | null = null
@@ -349,9 +548,10 @@ export class PixiRoadRashEngine {
         this.pauseText.visible = false
         root.addChild(this.pauseText)
 
-        // Décor aléatoire
+        // Décor aléatoire - beaucoup plus d'éléments pour la route longue
         this.sceneryItems = []
-        for (let i = 0; i < 80; i++) {
+        for (let i = 0; i < 500; i++) {
+            // 5x plus d'éléments de décor
             this.sceneryItems.push({
                 id: i,
                 type:
@@ -451,12 +651,68 @@ export class PixiRoadRashEngine {
         this.speed = nextSpeed
         const speedFactor = nextSpeed / ROAD_SPEED
 
-        // Joueur
+        // Trouver le segment actuel du joueur
+        const currentSegmentIndex =
+            Math.floor((this.scrollPos + PLAYER_Z) / SEGMENT_LENGTH) %
+            this.road.length
+        const playerSegment = this.road[currentSegmentIndex]
+
+        // Déplacement latéral plus doux
+        const moveSpeed = PLAYER_MOVE_SPEED * deltaTime * (speedFactor / 5)
+        if (this.player.isMovingLeft) {
+            this.player.x -= moveSpeed * ROAD_WIDTH
+        } else if (this.player.isMovingRight) {
+            this.player.x += moveSpeed * ROAD_WIDTH
+        }
+
+        // Force centrifuge plus douce
+        const centrifugalForce =
+            moveSpeed *
+            (speedFactor / 5) *
+            playerSegment.curve *
+            CENTRIFUGAL_FORCE *
+            ROAD_WIDTH
+        this.player.x -= centrifugalForce
+
+        // Anticiper les virages à venir en regardant plusieurs segments devant
+        let upcomingCurve = 0
+        let totalWeight = 0
+        for (let i = 0; i < PLAYER_LOOK_AHEAD_SEGMENTS; i++) {
+            const lookAheadIndex = (currentSegmentIndex + i) % this.road.length
+            const segment = this.road[lookAheadIndex]
+            // Distribution exponentielle du poids pour une réponse plus rapide aux virages immédiats
+            const weight = Math.pow(0.7, i)
+            upcomingCurve += segment.curve * weight
+            totalWeight += weight
+        }
+        upcomingCurve /= totalWeight // Normalisation par le poids total
+
+        // Calcul de l'inclinaison cible avec plus de réactivité aux changements de direction
+        const targetTilt =
+            upcomingCurve * PLAYER_TILT_CURVE_RESPONSE * (speedFactor / 4)
+
+        // Application d'un effet ressort plus rapide
+        const tiltDiff = targetTilt - this.currentTilt
+        this.currentTilt +=
+            tiltDiff * PLAYER_TILT_SPRING * deltaTime * (1 + speedFactor * 0.5) // Plus rapide à haute vitesse
+
+        // Limiter l'inclinaison maximale
+        this.currentTilt = Math.max(
+            Math.min(this.currentTilt, PLAYER_TILT_MAX),
+            -PLAYER_TILT_MAX
+        )
+
+        // Appliquer l'inclinaison au sprite du joueur
+        if (this.playerSprite) {
+            this.playerSprite.rotation = this.currentTilt
+        }
+
+        // Mise à jour position avec limites
         this.player = updatePlayerPosition(
             this.player,
             deltaTime,
             window.innerWidth / 2,
-            ROAD_WIDTH / 2 // Largeur de route
+            ROAD_WIDTH / 2
         )
 
         // Scroll route (NE DÉPASSE PAS la fin du circuit)
@@ -465,7 +721,7 @@ export class PixiRoadRashEngine {
         if (this.scrollPos >= maxScroll) {
             this.scrollPos = maxScroll
             this.speed = 0
-            this.finished = true // ARRIVÉE !
+            this.finished = true // ARRIVÉE !
         }
 
         // Ennemis
@@ -550,6 +806,10 @@ export class PixiRoadRashEngine {
             if (segmentIndex >= this.road.length) break
             const segment = this.road[segmentIndex]
 
+            // Calcul de la distance relative pour les effets de perspective
+            const distancePercent = n / DRAW_DISTANCE
+            const fogFactor = 1 - Math.pow(distancePercent, 8 / 10)
+
             // Virage accumulé avec interpolation douce
             segment.p1.world.x = x
             segment.p2.world.x = x + dx
@@ -594,16 +854,40 @@ export class PixiRoadRashEngine {
                 dx += currentCurve
             }
 
-            if (
-                segment.p1.camera.z <= 0 ||
-                segment.p2.screen.y >= maxy ||
-                segment.p1.screen.w <= 0
-            )
+            // Conditions de rendu améliorées pour la distance
+            const isBehindCamera = segment.p1.camera.z <= 0
+            const isClippedByPrevious = segment.p2.screen.y >= maxy
+            const isTooSmall = segment.p1.screen.w < 2
+            const isAtHorizon = segment.p2.screen.y <= HORIZON + 5
+
+            if (isBehindCamera || (isClippedByPrevious && !isAtHorizon))
                 continue
 
             visibleSegments++
 
-            // Route principale
+            // Route principale avec effet de distance
+            let roadColor = ROAD_COLOR
+            let roadAlpha = 1
+
+            // Effet de brouillard progressif vers l'horizon
+            if (distancePercent > 0.4) {
+                const fadeAmount = (distancePercent - 0.4) / 0.6
+                // Mélange entre couleur route et couleur horizon
+                const r1 = (ROAD_COLOR >> 16) & 0xff
+                const g1 = (ROAD_COLOR >> 8) & 0xff
+                const b1 = ROAD_COLOR & 0xff
+                const r2 = (0x87ceeb >> 16) & 0xff // Couleur horizon bleu ciel
+                const g2 = (0x87ceeb >> 8) & 0xff
+                const b2 = 0x87ceeb & 0xff
+
+                const r = Math.round(r1 * (1 - fadeAmount) + r2 * fadeAmount)
+                const g = Math.round(g1 * (1 - fadeAmount) + g2 * fadeAmount)
+                const b = Math.round(b1 * (1 - fadeAmount) + b2 * fadeAmount)
+
+                roadColor = (r << 16) | (g << 8) | b
+                roadAlpha = Math.max(0.3, 1 - fadeAmount * 0.7)
+            }
+
             g.moveTo(
                 segment.p1.screen.x - segment.p1.screen.w,
                 segment.p1.screen.y
@@ -621,47 +905,105 @@ export class PixiRoadRashEngine {
                 segment.p2.screen.y
             )
             g.closePath()
-            g.fill({ color: ROAD_COLOR })
+            g.fill({ color: roadColor, alpha: roadAlpha })
 
-            // Bordures (gauche)
-            g.moveTo(
-                segment.p1.screen.x - segment.p1.screen.w,
-                segment.p1.screen.y
-            )
-            g.lineTo(
-                segment.p1.screen.x - segment.p1.screen.w + BORDER_WIDTH,
-                segment.p1.screen.y
-            )
-            g.lineTo(
-                segment.p2.screen.x - segment.p2.screen.w + BORDER_WIDTH,
-                segment.p2.screen.y
-            )
-            g.lineTo(
-                segment.p2.screen.x - segment.p2.screen.w,
-                segment.p2.screen.y
-            )
-            g.closePath()
-            g.fill({ color: BORDER_COLOR })
+            // Bordures avec effet de distance
+            if (segment.p1.screen.w > 10) {
+                // Ne dessiner les bordures que si assez larges
+                // Bordure de terre (gauche)
+                g.moveTo(
+                    segment.p1.screen.x -
+                        segment.p1.screen.w -
+                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p1.screen.x - segment.p1.screen.w,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x - segment.p2.screen.w,
+                    segment.p2.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x -
+                        segment.p2.screen.w -
+                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                    segment.p2.screen.y
+                )
+                g.closePath()
+                g.fill({
+                    color: DIRT_BORDER.COLOR,
+                    alpha: DIRT_BORDER.ALPHA * roadAlpha,
+                })
 
-            // Bordures (droite)
-            g.moveTo(
-                segment.p1.screen.x + segment.p1.screen.w - BORDER_WIDTH,
-                segment.p1.screen.y
-            )
-            g.lineTo(
-                segment.p1.screen.x + segment.p1.screen.w,
-                segment.p1.screen.y
-            )
-            g.lineTo(
-                segment.p2.screen.x + segment.p2.screen.w,
-                segment.p2.screen.y
-            )
-            g.lineTo(
-                segment.p2.screen.x + segment.p2.screen.w - BORDER_WIDTH,
-                segment.p2.screen.y
-            )
-            g.closePath()
-            g.fill({ color: BORDER_COLOR })
+                // Bordure de terre (droite)
+                g.moveTo(
+                    segment.p1.screen.x + segment.p1.screen.w,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p1.screen.x +
+                        segment.p1.screen.w +
+                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x +
+                        segment.p2.screen.w +
+                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                    segment.p2.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x + segment.p2.screen.w,
+                    segment.p2.screen.y
+                )
+                g.closePath()
+                g.fill({
+                    color: DIRT_BORDER.COLOR,
+                    alpha: DIRT_BORDER.ALPHA * roadAlpha,
+                })
+
+                // Bordures (gauche)
+                g.moveTo(
+                    segment.p1.screen.x - segment.p1.screen.w,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p1.screen.x - segment.p1.screen.w + BORDER_WIDTH,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x - segment.p2.screen.w + BORDER_WIDTH,
+                    segment.p2.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x - segment.p2.screen.w,
+                    segment.p2.screen.y
+                )
+                g.closePath()
+                g.fill({ color: BORDER_COLOR, alpha: roadAlpha })
+
+                // Bordures (droite)
+                g.moveTo(
+                    segment.p1.screen.x + segment.p1.screen.w - BORDER_WIDTH,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p1.screen.x + segment.p1.screen.w,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x + segment.p2.screen.w,
+                    segment.p2.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x + segment.p2.screen.w - BORDER_WIDTH,
+                    segment.p2.screen.y
+                )
+                g.closePath()
+                g.fill({ color: BORDER_COLOR, alpha: roadAlpha })
+            }
 
             // Pointillés des lanes (3 lanes avec rectangles animés)
             const DASH_GROUP = DASH_INTERVAL_SEGMENTS + DASH_LENGTH_SEGMENTS
@@ -673,7 +1015,8 @@ export class PixiRoadRashEngine {
 
             for (let lane = 1; lane < PLAYER_LANES; lane++) {
                 // 2 lignes de pointillés pour 3 lanes
-                if (isDashVisible && segment.p1.screen.w > 50) {
+                if (isDashVisible && segment.p1.screen.w > 8) {
+                    // Seuil plus bas pour voir plus loin
                     // segment.p1.screen.w est la demi-largeur, donc largeur complète = 2 * w
                     const laneWidth1 = (2 * segment.p1.screen.w) / PLAYER_LANES
                     const laneWidth2 = (2 * segment.p2.screen.w) / PLAYER_LANES
@@ -700,12 +1043,13 @@ export class PixiRoadRashEngine {
                     g.lineTo(laneX2 + dashWidth / 2, segment.p2.screen.y)
                     g.lineTo(laneX2 - dashWidth / 2, segment.p2.screen.y)
                     g.closePath()
-                    g.fill({ color: 0xffffff })
+                    g.fill({ color: 0xffffff, alpha: roadAlpha })
                 }
             }
 
             // Lignes grises foncées au centre de chaque lane
-            if (segment.p1.screen.w > 30) {
+            if (segment.p1.screen.w > 5) {
+                // Seuil plus bas pour voir plus loin
                 const laneWidth1 = (2 * segment.p1.screen.w) / PLAYER_LANES
                 const laneWidth2 = (2 * segment.p2.screen.w) / PLAYER_LANES
 
@@ -757,7 +1101,7 @@ export class PixiRoadRashEngine {
                             segment.p2.screen.y
                         )
                         g.closePath()
-                        g.fill({ color: 0x404040, alpha }) // Gris plus clair avec transparence progressive
+                        g.fill({ color: 0x404040, alpha: alpha * roadAlpha }) // Gris plus clair avec transparence progressive et effet distance
                     }
                 }
             }
@@ -893,7 +1237,7 @@ export class PixiRoadRashEngine {
                 (item.side === "left" ? -1 : 1) *
                 (ROAD_WIDTH / 2 + item.offset + 300)
 
-            // Projection : on projette le point à la position exacte du décor !
+            // Projection : on projette le point à la position exacte du décor !
             const point: Point = {
                 world: { x: roadX + offset, y: 0, z: worldZ },
                 camera: { x: 0, y: 0, z: 0 },
@@ -915,38 +1259,65 @@ export class PixiRoadRashEngine {
                 point.screen.y < screenH &&
                 point.screen.y > HORIZON
             ) {
-                // Taille relative à la distance réelle (dz)
-                const t = dz / (DRAW_DISTANCE * SEGMENT_LENGTH)
-                const scale = 0.35 + 0.7 * (1 - t)
+                // Combine distance Z et position Y pour une échelle correcte
+                const distancePercent = dz / (DRAW_DISTANCE * SEGMENT_LENGTH)
+                const screenYPercent =
+                    (point.screen.y - HORIZON) / (screenH - HORIZON)
+
+                // L'échelle est influencée par les deux facteurs
+                // - distancePercent contrôle l'apparition lointaine
+                // - screenYPercent contrôle la perspective à l'écran
+                const distanceScale = Math.pow(1 - distancePercent, 2) // Quadratique pour apparition progressive
+                const perspectiveScale = Math.pow(
+                    screenYPercent,
+                    1 / SCENERY_SCALE_RANGE.CURVE
+                )
+
+                // On prend le minimum des deux pour assurer que les objets sont petits au loin
+                const scaleProgress = Math.min(distanceScale, perspectiveScale)
+
+                const scale =
+                    SCENERY_SCALE_RANGE.MIN +
+                    (SCENERY_SCALE_RANGE.MAX *
+                        SCENERY_SCALE_RANGE.PLAYER_LEVEL -
+                        SCENERY_SCALE_RANGE.MIN) *
+                        scaleProgress
+
                 if (item.type === "tree") {
-                    // Tronc 3x plus gros
+                    // Tronc avec nouvelle échelle
+                    const trunkWidth = 50 * scale
+                    const trunkHeight = 150 * scale
                     g.rect(
-                        point.screen.x - 30 * scale,
-                        point.screen.y - 180 * scale,
-                        60 * scale,
-                        180 * scale
+                        point.screen.x - trunkWidth / 2,
+                        point.screen.y - trunkHeight,
+                        trunkWidth,
+                        trunkHeight
                     )
                     g.fill({ color: 0x8b4513 })
-                    // Feuillage 3x plus gros
+
+                    // Feuillage avec nouvelle échelle
+                    const foliageRadius = 105 * scale
                     g.circle(
                         point.screen.x,
-                        point.screen.y - 180 * scale,
-                        105 * scale
+                        point.screen.y - trunkHeight,
+                        foliageRadius
                     )
                     g.fill({ color: TREE_COLOR })
                 } else if (item.type === "rock") {
+                    const rockRadius = 20 * scale
                     g.circle(
                         point.screen.x,
-                        point.screen.y - 20 * scale,
-                        20 * scale
+                        point.screen.y - rockRadius,
+                        rockRadius
                     )
                     g.fill({ color: ROCK_COLOR })
                 } else if (item.type === "building") {
+                    const buildingSize = 48 * scale
                     g.rect(
-                        point.screen.x - 24 * scale,
-                        point.screen.y - 48 * scale,
-                        48 * scale,
-                        48 * scale
+                        point.screen.x - buildingSize / 2,
+                        point.screen.y - buildingSize,
+                        buildingSize,
+                        buildingSize
                     )
                     g.fill({ color: BUILDING_COLOR })
                 }
@@ -990,7 +1361,7 @@ export class PixiRoadRashEngine {
         if (this.playerSprite) {
             this.playerSprite.x = this.player.x + PLAYER_WIDTH / 2
             this.playerSprite.y = this.player.y + PLAYER_HEIGHT / 2
-            this.playerSprite.rotation = this.player.rotation
+            this.playerSprite.rotation = this.currentTilt
         }
 
         // Écran de victoire quand le jeu est terminé
