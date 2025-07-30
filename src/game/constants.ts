@@ -15,7 +15,7 @@ export const DRAW_DISTANCE = 300 // distance de vue augmentée (2x plus loin)
 export const SEGMENT_LENGTH = 250 // longueur d'un segment (en px ou logique)
 export const ROAD_WIDTH = 1700 // largeur de la route (utilisée partout)
 export const ROAD_MIN_WIDTH = 150 // largeur minimale visuelle à l'horizon
-export const ROAD_MAX_WIDTH = 1700 // largeur max visuelle proche joueur
+export const ROAD_MAX_WIDTH = window.innerWidth * 0.92 // largeur max visuelle proche joueur
 export const RUMBLE_LENGTH = 3 // nombre de segments entre chaque bordure
 export const LANE_COUNT = 3 // nombre de voies pour le joueur
 

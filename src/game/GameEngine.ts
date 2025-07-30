@@ -52,7 +52,10 @@ import {
     PLAYER_WIDTH,
     updatePlayerPosition,
 } from "./Player"
-import { getProjectedRoadBordersAtPlayer, project3D } from "./utils/projection"
+import {
+    getProjectedRoadBordersAtPlayerSynced,
+    project3D,
+} from "./utils/projection"
 import { getRoadCurveOffsetDelta, type Point } from "./utils/roadCurve"
 import { buildRoadSegments } from "./utils/roadGeneration"
 
@@ -337,6 +340,41 @@ export class PixiRoadRashEngine {
             if (this.debugText) this.debugText.visible = this.showDebug
         }
 
+        // Test de démonstration offroad (touche T pour droite, Y pour gauche)
+        if (e.key === "t" || e.key === "T") {
+            // Forcer le joueur temporairement hors route côté droit
+            this.player.x = window.innerWidth * 0.9
+        }
+
+        if (e.key === "y" || e.key === "Y") {
+            // Forcer le joueur temporairement hors route côté gauche
+            this.player.x = -PLAYER_WIDTH / 2
+        }
+
+        // Recentrer le joueur (touche C)
+        // Recentrer le joueur (touche C)
+        if (e.key === "c" || e.key === "C") {
+            // Utilise la même logique que pour le offroad !
+            const cameraDepth =
+                1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
+            const playerZ = this.scrollPos + PLAYER_Z
+            const { roadLeft, roadRight } =
+                getProjectedRoadBordersAtPlayerSynced(
+                    this.road,
+                    this.scrollPos,
+                    playerZ,
+                    cameraDepth,
+                    window.innerWidth,
+                    window.innerHeight,
+                    ROAD_WIDTH,
+                    this.player.x,
+                    PLAYER_WIDTH,
+                    this.cameraSmoothing
+                )
+            const roadCenter = (roadLeft + roadRight) / 2
+            this.player.x = roadCenter - PLAYER_WIDTH / 2
+        }
+
         if (e.key === "ArrowLeft") this.player.isMovingLeft = true
         if (e.key === "ArrowRight") this.player.isMovingRight = true
         if (e.key === "ArrowUp") this.isAccelerating = true
@@ -372,6 +410,23 @@ export class PixiRoadRashEngine {
                 MIN_SPEED,
                 this.speed - AUTO_DECELERATION * deltaTime
             )
+        }
+
+        // Effet offroad : décélération brutale si le joueur est hors route
+        if (this.player.isOffRoad) {
+            this.speed = Math.max(
+                MIN_SPEED,
+                this.speed - this.speed * 0.02 * deltaTime // Perte progressive de vitesse
+            )
+
+            // Vibration du joueur offroad (effet visuel)
+            if (this.playerSprite) {
+                const vibrationIntensity = Math.min(this.speed / 1000, 1) * 3
+                this.playerSprite.x +=
+                    (Math.random() - 0.5) * vibrationIntensity
+                this.playerSprite.y +=
+                    (Math.random() - 0.5) * vibrationIntensity
+            }
         }
 
         // Trouver le segment actuel du joueur
@@ -431,30 +486,34 @@ export class PixiRoadRashEngine {
         }
 
         // Mise à jour position avec limites
-        this.player = updatePlayerPosition(
-            this.player,
-            deltaTime,
-            window.innerWidth / 2,
-            ROAD_WIDTH / 2
-        )
+        this.player = updatePlayerPosition(this.player, deltaTime)
 
         // Juste après avoir bougé le joueur:
         const cameraDepth = 1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
         const playerZ = this.scrollPos + PLAYER_Z
-        const { roadLeft, roadRight } = getProjectedRoadBordersAtPlayer(
+
+        const { roadLeft, roadRight } = getProjectedRoadBordersAtPlayerSynced(
             this.road,
             this.scrollPos,
             playerZ,
             cameraDepth,
             window.innerWidth,
             window.innerHeight,
-            ROAD_WIDTH
+            ROAD_WIDTH,
+            this.player.x,
+            PLAYER_WIDTH,
+            this.cameraSmoothing
         )
-        const playerCenterX = this.player.x + PLAYER_WIDTH / 2
 
-        // Teste “off road” avec ces bords-là :
+        const playerLeftEdge = this.player.x
+        const playerRightEdge = this.player.x + PLAYER_WIDTH
+        const tolerance = 6
+        const routeMin = roadLeft + tolerance
+        const routeMax = roadRight - tolerance
+
+        // S'il n'y a PAS de chevauchement
         this.player.isOffRoad =
-            playerCenterX < roadLeft || playerCenterX > roadRight
+            playerRightEdge < routeMin || playerLeftEdge > routeMax
 
         // Scroll route (NE DÉPASSE PAS la fin du circuit)
         const maxScroll = (this.road.length - DRAW_DISTANCE) * SEGMENT_LENGTH
@@ -543,6 +602,10 @@ export class PixiRoadRashEngine {
         // Position fractionnaire dans le segment actuel pour l'interpolation
         const currentSegmentProgress =
             (this.scrollPos % SEGMENT_LENGTH) / SEGMENT_LENGTH
+
+        const firstSegment = this.road[baseSegmentIndex % this.road.length]
+        dx += firstSegment.curve * (1 - currentSegmentProgress)
+        x += dx
 
         for (let n = 0; n < DRAW_DISTANCE; n++) {
             const segmentIndex = baseSegmentIndex + n
@@ -650,14 +713,19 @@ export class PixiRoadRashEngine {
             g.closePath()
             g.fill({ color: roadColor, alpha: roadAlpha })
 
-            // Bordures avec effet de distance
+            // Bordures avec effet de distance (plus visibles)
             if (segment.p1.screen.w > 10) {
                 // Ne dessiner les bordures que si assez larges
-                // Bordure de terre (gauche)
+
+                // Bordures de sécurité renforcées pour mieux marquer les limites
+                const enhancedBorderWidth =
+                    BORDER_WIDTH * Math.max(1, 2 - distancePercent)
+
+                // Bordure de terre (gauche) - plus large pour être plus visible
                 g.moveTo(
                     segment.p1.screen.x -
                         segment.p1.screen.w -
-                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                        enhancedBorderWidth * DIRT_BORDER.WIDTH_FACTOR * 1.5,
                     segment.p1.screen.y
                 )
                 g.lineTo(
@@ -671,13 +739,13 @@ export class PixiRoadRashEngine {
                 g.lineTo(
                     segment.p2.screen.x -
                         segment.p2.screen.w -
-                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                        enhancedBorderWidth * DIRT_BORDER.WIDTH_FACTOR * 1.5,
                     segment.p2.screen.y
                 )
                 g.closePath()
                 g.fill({
                     color: DIRT_BORDER.COLOR,
-                    alpha: DIRT_BORDER.ALPHA * roadAlpha,
+                    alpha: Math.min(1, DIRT_BORDER.ALPHA * roadAlpha * 1.5),
                 })
 
                 // Bordure de terre (droite)
@@ -688,13 +756,13 @@ export class PixiRoadRashEngine {
                 g.lineTo(
                     segment.p1.screen.x +
                         segment.p1.screen.w +
-                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                        enhancedBorderWidth * DIRT_BORDER.WIDTH_FACTOR * 1.5,
                     segment.p1.screen.y
                 )
                 g.lineTo(
                     segment.p2.screen.x +
                         segment.p2.screen.w +
-                        BORDER_WIDTH * DIRT_BORDER.WIDTH_FACTOR,
+                        enhancedBorderWidth * DIRT_BORDER.WIDTH_FACTOR * 1.5,
                     segment.p2.screen.y
                 )
                 g.lineTo(
@@ -704,20 +772,24 @@ export class PixiRoadRashEngine {
                 g.closePath()
                 g.fill({
                     color: DIRT_BORDER.COLOR,
-                    alpha: DIRT_BORDER.ALPHA * roadAlpha,
+                    alpha: Math.min(1, DIRT_BORDER.ALPHA * roadAlpha * 1.5),
                 })
 
-                // Bordures (gauche)
+                // Bordures principales (gauche) - plus épaisses et contrastées
                 g.moveTo(
                     segment.p1.screen.x - segment.p1.screen.w,
                     segment.p1.screen.y
                 )
                 g.lineTo(
-                    segment.p1.screen.x - segment.p1.screen.w + BORDER_WIDTH,
+                    segment.p1.screen.x -
+                        segment.p1.screen.w +
+                        enhancedBorderWidth,
                     segment.p1.screen.y
                 )
                 g.lineTo(
-                    segment.p2.screen.x - segment.p2.screen.w + BORDER_WIDTH,
+                    segment.p2.screen.x -
+                        segment.p2.screen.w +
+                        enhancedBorderWidth,
                     segment.p2.screen.y
                 )
                 g.lineTo(
@@ -727,9 +799,39 @@ export class PixiRoadRashEngine {
                 g.closePath()
                 g.fill({ color: BORDER_COLOR, alpha: roadAlpha })
 
-                // Bordures (droite)
+                // Ligne de sécurité interne (gauche) - ligne rouge pour marquer vraiment le bord
                 g.moveTo(
-                    segment.p1.screen.x + segment.p1.screen.w - BORDER_WIDTH,
+                    segment.p1.screen.x -
+                        segment.p1.screen.w +
+                        enhancedBorderWidth * 0.8,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p1.screen.x -
+                        segment.p1.screen.w +
+                        enhancedBorderWidth,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x -
+                        segment.p2.screen.w +
+                        enhancedBorderWidth,
+                    segment.p2.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x -
+                        segment.p2.screen.w +
+                        enhancedBorderWidth * 0.8,
+                    segment.p2.screen.y
+                )
+                g.closePath()
+                g.fill({ color: 0xff3333, alpha: roadAlpha * 0.7 })
+
+                // Bordures principales (droite)
+                g.moveTo(
+                    segment.p1.screen.x +
+                        segment.p1.screen.w -
+                        enhancedBorderWidth,
                     segment.p1.screen.y
                 )
                 g.lineTo(
@@ -741,11 +843,41 @@ export class PixiRoadRashEngine {
                     segment.p2.screen.y
                 )
                 g.lineTo(
-                    segment.p2.screen.x + segment.p2.screen.w - BORDER_WIDTH,
+                    segment.p2.screen.x +
+                        segment.p2.screen.w -
+                        enhancedBorderWidth,
                     segment.p2.screen.y
                 )
                 g.closePath()
                 g.fill({ color: BORDER_COLOR, alpha: roadAlpha })
+
+                // Ligne de sécurité interne (droite)
+                g.moveTo(
+                    segment.p1.screen.x +
+                        segment.p1.screen.w -
+                        enhancedBorderWidth,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p1.screen.x +
+                        segment.p1.screen.w -
+                        enhancedBorderWidth * 0.8,
+                    segment.p1.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x +
+                        segment.p2.screen.w -
+                        enhancedBorderWidth * 0.8,
+                    segment.p2.screen.y
+                )
+                g.lineTo(
+                    segment.p2.screen.x +
+                        segment.p2.screen.w -
+                        enhancedBorderWidth,
+                    segment.p2.screen.y
+                )
+                g.closePath()
+                g.fill({ color: 0xff3333, alpha: roadAlpha * 0.7 })
             }
 
             // Pointillés des lanes (3 lanes avec rectangles animés)
@@ -1148,61 +1280,168 @@ export class PixiRoadRashEngine {
         if (this.debugText && this.showDebug) {
             // Calcul des données utiles pour debug :
             const screenW = window.innerWidth
-            const routeCenterX = screenW / 2
-            // Route visuelle à la position du joueur :
-            // (Dans updatePlayerPosition tu passes routeCenterX, roadWidthAtPlayer)
-            // Recalcule ici pour vérification (tu pourrais exposer la fonction)
+
+            const playerZ = this.scrollPos + PLAYER_Z
+            const cameraDepth =
+                1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
+            const { roadLeft, roadRight } =
+                getProjectedRoadBordersAtPlayerSynced(
+                    this.road,
+                    this.scrollPos,
+                    playerZ,
+                    cameraDepth,
+                    screenW,
+                    screenH,
+                    ROAD_WIDTH,
+                    this.player.x,
+                    PLAYER_WIDTH,
+                    this.cameraSmoothing
+                )
 
             // Trouver le segment “sous” le joueur :
-            const playerZ = this.scrollPos + PLAYER_Z
             const segIndex =
                 Math.floor(playerZ / SEGMENT_LENGTH) % this.road.length
             const seg = this.road[segIndex]
             const curve = seg.curve
 
             // Calculer la largeur route à la position du joueur (cf. projection)
-            // Ici ROAD_WIDTH / 2 car c’est ce que tu passes en “logique” dans updatePlayerPosition
             const roadWidthAtPlayer = ROAD_WIDTH / 2
 
             // Centre du joueur (pour test collision/bordure)
             const playerCenterX = this.player.x + PLAYER_WIDTH / 2
 
-            // Limites de la route (mêmes calculs que dans updatePlayerPosition)
-            const roadMinX = routeCenterX - roadWidthAtPlayer
-            const roadMaxX = routeCenterX + roadWidthAtPlayer
-
             if (this.showDebug && this.graphics) {
-                g.moveTo(roadMinX, screenH - 50)
-                g.lineTo(roadMinX, screenH)
-                g.stroke({ color: 0xff0000, width: 2 })
+                // BORDURES LOGIQUES DE LA ROUTE (lignes épaisses rouges)
+                const debugHeight = 120
 
-                g.moveTo(roadMaxX, screenH - 50)
-                g.lineTo(roadMaxX, screenH)
-                g.stroke({ color: 0xff0000, width: 2 })
+                // Ligne verticale gauche
+                g.beginPath()
+                g.lineStyle(4, 0xff0000)
+                g.moveTo(roadLeft, screenH - debugHeight)
+                g.lineTo(roadLeft, screenH)
+                g.stroke()
+
+                // Ligne verticale droite
+                g.beginPath()
+                g.lineStyle(4, 0xff0000)
+                g.moveTo(roadRight, screenH - debugHeight)
+                g.lineTo(roadRight, screenH)
+                g.stroke()
+
+                // Zone de tolérance (lignes oranges)
+                const tolerance = 6
+
+                // Tolérance gauche
+                g.beginPath()
+                g.lineStyle(2, 0xff8800)
+                g.moveTo(roadLeft + tolerance, screenH - debugHeight + 10)
+                g.lineTo(roadLeft + tolerance, screenH - 10)
+                g.stroke()
+
+                // Tolérance droite
+                g.beginPath()
+                g.lineStyle(2, 0xff8800)
+                g.moveTo(roadRight - tolerance, screenH - debugHeight + 10)
+                g.lineTo(roadRight - tolerance, screenH - 10)
+                g.stroke()
+
+                // Hitbox du joueur (rectangle rouge)
+                const playerLeftEdge = this.player.x
+                const playerRightEdge = this.player.x + PLAYER_WIDTH
+                const playerTopEdge = this.player.y
+                const playerBottomEdge = this.player.y + PLAYER_HEIGHT
+
+                g.beginPath()
+                g.lineStyle(2, 0xff0000)
+                g.moveTo(playerLeftEdge, playerTopEdge)
+                g.lineTo(playerRightEdge, playerTopEdge)
+                g.lineTo(playerRightEdge, playerBottomEdge)
+                g.lineTo(playerLeftEdge, playerBottomEdge)
+                g.lineTo(playerLeftEdge, playerTopEdge)
+                g.stroke()
+
+                // Point central (petit cercle)
+                g.beginPath()
+                g.lineStyle(1, 0xff0000)
+                g.drawCircle(
+                    playerCenterX,
+                    this.player.y + PLAYER_HEIGHT / 2,
+                    3
+                )
+                g.stroke()
+
+                // Indicateur offroad (rectangle rouge clignotant)
+                if (this.player.isOffRoad) {
+                    const blinkIntensity =
+                        Math.sin(Date.now() * 0.01) * 0.5 + 0.5
+                    g.rect(screenW - 200, 20, 180, 30)
+                    g.fill({
+                        color: 0xff0000,
+                        alpha: 0.3 + blinkIntensity * 0.4,
+                    })
+                }
             }
 
             // Pourcentage position du joueur sur la largeur de la route (0 = gauche, 1 = droite)
-            const posPct = (
-                (playerCenterX - roadMinX) /
-                (roadMaxX - roadMinX)
-            ).toFixed(3)
+            let posPct = 0
+            const routeWidth = roadRight - roadLeft
+            if (Math.abs(routeWidth) > 10) {
+                // Seuil plus élevé pour éviter divisions par des très petits nombres
+                posPct = (playerCenterX - roadLeft) / routeWidth
+            } else {
+                posPct = 0.5 // Défaut : centre de la route si calcul impossible
+            }
+
+            // Données détaillées pour le debug
+            const playerLeftEdge = this.player.x
+            const playerRightEdge = this.player.x + PLAYER_WIDTH
+            const tolerance = 5
+            const isLeftOut = playerRightEdge < roadLeft + tolerance
+            const isRightOut = playerLeftEdge > roadRight - tolerance
+
+            console.log("DEBUG COLLISION", {
+                playerLeft: this.player.x,
+                playerRight: this.player.x + PLAYER_WIDTH,
+                routeMin: roadLeft + tolerance,
+                routeMax: roadRight - tolerance,
+                routeWidth: roadRight - roadLeft,
+            })
 
             this.debugText.text =
-                `X: ${this.player.x.toFixed(1)} | Y: ${this.player.y.toFixed(
+                `Position joueur: X=${this.player.x.toFixed(
                     1
-                )}\n` +
-                `Player center X: ${playerCenterX.toFixed(1)}\n` +
-                `Road min X: ${roadMinX.toFixed(1)} | max X: ${roadMaxX.toFixed(
+                )} | Centre=${playerCenterX.toFixed(1)}\n` +
+                `Limites joueur: ${playerLeftEdge.toFixed(
                     1
-                )}\n` +
-                `Position sur la route: ${(Number(posPct) * 100).toFixed(
+                )} ↔ ${playerRightEdge.toFixed(
                     1
-                )} %\n` +
-                `Segment: ${segIndex} / ${this.road.length} | courbe: ${curve}\n` +
-                `Offroad: ${this.player.isOffRoad ? "OUI" : "non"}\n` +
-                `Scroll: ${this.scrollPos.toFixed(
+                )} (largeur=${PLAYER_WIDTH})\n` +
+                `Bordures route: ${roadLeft.toFixed(1)} ↔ ${roadRight.toFixed(
+                    1
+                )} (largeur=${routeWidth.toFixed(1)})\n` +
+                `Position sur route: ${(posPct * 100).toFixed(
+                    1
+                )}% | Offset centre: ${(playerCenterX - roadLeft).toFixed(
+                    1
+                )}px\n` +
+                `Segment: ${segIndex}/${
+                    this.road.length
+                } | Courbe: ${curve.toFixed(2)}\n` +
+                `${this.player.isOffRoad ? "🔴 OFFROAD!" : "✅ Sur la route"} ${
+                    isLeftOut
+                        ? "(trop à gauche)"
+                        : isRightOut
+                        ? "(trop à droite)"
+                        : ""
+                }\n` +
+                `Vitesse: ${this.speed.toFixed(
                     0
-                )} | Speed: ${this.speed.toFixed(0)}`
+                )} | Scroll: ${this.scrollPos.toFixed(0)}\n` +
+                `Debug calc: roadW=${ROAD_WIDTH} | camDepth=${cameraDepth.toFixed(
+                    1
+                )} | segIdx=${segIndex}\n` +
+                `Contrôles: D=debug | T=offroad droite | Y=offroad gauche | C=recentrer | P=pause\n` +
+                `Debug: ROUGE=bords route (SYNCHRO!) | ORANGE=tolérance | VERT=centre | JAUNE=limites joueur`
         }
     }
 
