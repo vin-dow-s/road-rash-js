@@ -10,6 +10,7 @@ import {
 } from "pixi.js"
 import {
     ACCELERATION,
+    AUTO_DECELERATION,
     BORDER_COLOR,
     BORDER_WIDTH,
     BRAKE,
@@ -25,6 +26,7 @@ import {
     HORIZON,
     MAX_ENEMIES,
     MAX_SPEED,
+    MIN_SPEED,
     MOTO_COLORS,
     PLAYER_LANES,
     PLAYER_LOOK_AHEAD_SEGMENTS,
@@ -33,13 +35,11 @@ import {
     PLAYER_TILT_MAX,
     PLAYER_TILT_SPRING,
     PLAYER_Z,
-    ROAD,
     ROAD_COLOR,
     ROAD_SIDE_COLOR,
     ROAD_SPEED,
     ROAD_WIDTH,
     ROCK_COLOR,
-    RUMBLE_LENGTH,
     SCENERY_SCALE_RANGE,
     SEGMENT_LENGTH,
     TERRAIN_FAR_COLOR,
@@ -52,22 +52,11 @@ import {
     PLAYER_WIDTH,
     updatePlayerPosition,
 } from "./Player"
+import { getProjectedRoadBordersAtPlayer, project3D } from "./utils/projection"
+import { getRoadCurveOffsetDelta, type Point } from "./utils/roadCurve"
+import { buildRoadSegments } from "./utils/roadGeneration"
 
 type PlayerState = ReturnType<typeof createPlayerState>
-
-interface Point {
-    world: { x: number; y: number; z: number }
-    camera: { x: number; y: number; z: number }
-    screen: { x: number; y: number; w: number }
-}
-
-interface Segment {
-    index: number
-    curve: number
-    p1: Point
-    p2: Point
-    color: number
-}
 
 interface SceneryItem {
     id: number
@@ -84,313 +73,13 @@ interface Enemy {
     speed: number
 }
 
-// --- FONCTIONS D'EASING POUR LES COURBES (méthode Jake Gordon) ---
-function easeIn(a: number, b: number, percent: number): number {
-    return a + (b - a) * Math.pow(percent, 2)
-}
-
-function easeOut(a: number, b: number, percent: number): number {
-    return a + (b - a) * (1 - Math.pow(1 - percent, 2))
-}
-
-function easeInOut(a: number, b: number, percent: number): number {
-    return a + (b - a) * (-Math.cos(percent * Math.PI) / 2 + 0.5)
-}
-
-// --- GÉNÉRATION DE ROUTE À LA JAKE GORDON ---
-function buildRoadSegments(): Segment[] {
-    const segments: Segment[] = []
-    const segmentLength = SEGMENT_LENGTH
-
-    // Utilitaire pour ajouter un segment
-    function addSegment(curve: number) {
-        const n = segments.length
-        segments.push({
-            index: n,
-            curve,
-            color:
-                Math.floor(n / RUMBLE_LENGTH) % 2 ? ROAD_COLOR : BORDER_COLOR,
-            p1: {
-                world: { x: 0, y: 0, z: n * segmentLength },
-                camera: { x: 0, y: 0, z: 0 },
-                screen: { x: 0, y: 0, w: 0 },
-            },
-            p2: {
-                world: { x: 0, y: 0, z: (n + 1) * segmentLength },
-                camera: { x: 0, y: 0, z: 0 },
-                screen: { x: 0, y: 0, w: 0 },
-            },
-        })
-    }
-
-    // Fonction pour ajouter une section de route avec easing (comme Jake Gordon)
-    function addRoad(
-        enter: number,
-        hold: number,
-        leave: number,
-        curve: number
-    ) {
-        let n: number
-        for (n = 0; n < enter; n++) {
-            addSegment(easeIn(0, curve, n / enter))
-        }
-        for (n = 0; n < hold; n++) {
-            addSegment(curve)
-        }
-        for (n = 0; n < leave; n++) {
-            addSegment(easeInOut(curve, 0, n / leave))
-        }
-    }
-
-    // Fonctions d'aide pour différents types de sections
-    function addStraight(num?: number) {
-        num = num || ROAD.LENGTH.MEDIUM
-        addRoad(num, num, num, 0)
-    }
-
-    function addCurve(num?: number, curve?: number) {
-        num = num || ROAD.LENGTH.MEDIUM
-        curve = curve || ROAD.CURVE.MEDIUM
-        addRoad(num, num, num, curve)
-    }
-
-    function addSCurves() {
-        addRoad(
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            -ROAD.CURVE.EASY
-        )
-        addRoad(
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.CURVE.MEDIUM
-        )
-        addRoad(
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.CURVE.EASY
-        )
-        addRoad(
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            -ROAD.CURVE.EASY
-        )
-        addRoad(
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            ROAD.LENGTH.MEDIUM,
-            -ROAD.CURVE.MEDIUM
-        )
-    }
-
-    function addBigSCurves() {
-        addRoad(
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            -ROAD.CURVE.MEDIUM
-        )
-        addRoad(
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.CURVE.HARD
-        )
-        addRoad(
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.CURVE.MEDIUM
-        )
-        addRoad(
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            -ROAD.CURVE.HARD
-        )
-        addRoad(
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            ROAD.LENGTH.LONG,
-            -ROAD.CURVE.EASY
-        )
-    }
-
-    function addChicanes() {
-        addRoad(
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            ROAD.CURVE.HARD
-        )
-        addRoad(
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            -ROAD.CURVE.HARD
-        )
-        addRoad(
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            ROAD.CURVE.MEDIUM
-        )
-        addRoad(
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            ROAD.LENGTH.SHORT,
-            -ROAD.CURVE.MEDIUM
-        )
-    }
-
-    // --- CONSTRUCTION DE LA ROUTE LONGUE ET VARIÉE ---
-    // Départ avec une ligne droite
-    addStraight(ROAD.LENGTH.SHORT / 4)
-
-    // Section 1: Introduction progressive
-    addSCurves()
-    addStraight(ROAD.LENGTH.LONG)
-    addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EASY)
-    addStraight(ROAD.LENGTH.MEDIUM)
-
-    // Section 2: Montée en difficulté
-    addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.MEDIUM)
-    addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.MEDIUM)
-    addStraight(ROAD.LENGTH.VERY_LONG)
-    addBigSCurves()
-
-    // Section 3: Chicanes rapides
-    addStraight(ROAD.LENGTH.LONG)
-    addChicanes()
-    addStraight(ROAD.LENGTH.MEDIUM)
-    addChicanes()
-
-    // Section 4: Courbes longues et fluides
-    addStraight(ROAD.LENGTH.LONG)
-    addCurve(ROAD.LENGTH.VERY_LONG, ROAD.CURVE.EASY)
-    addCurve(ROAD.LENGTH.VERY_LONG, -ROAD.CURVE.EASY)
-    addStraight(ROAD.LENGTH.LONG)
-
-    // Section 5: Mix complexe
-    addSCurves()
-    addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.HARD)
-    addStraight(ROAD.LENGTH.MEDIUM)
-    addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.HARD)
-    addBigSCurves()
-
-    // Section 6: Courbes extrêmes
-    addStraight(ROAD.LENGTH.VERY_LONG)
-    addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EXTREME)
-    addStraight(ROAD.LENGTH.SHORT)
-    addCurve(ROAD.LENGTH.MEDIUM, -ROAD.CURVE.EXTREME)
-    addStraight(ROAD.LENGTH.LONG)
-
-    // Section 7: Finale technique
-    addChicanes()
-    addSCurves()
-    addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.MEDIUM)
-    addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.MEDIUM)
-    addStraight(ROAD.LENGTH.VERY_LONG)
-
-    // Section 8: Sprint final
-    addBigSCurves()
-    addStraight(ROAD.LENGTH.VERY_LONG)
-    addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EASY)
-    addStraight(ROAD.LENGTH.LONG)
-
-    // Ligne d'arrivée
-    addStraight(ROAD.LENGTH.MEDIUM)
-
-    return segments
-}
-
-function project3D(
-    point: Point,
-    camX: number,
-    camY: number,
-    camZ: number,
-    cameraDepth: number,
-    width: number,
-    height: number,
-    roadWidth: number
-) {
-    const dz = point.world.z - camZ
-    point.camera.x = point.world.x - camX
-    point.camera.y = point.world.y - camY
-    point.camera.z = dz
-
-    // Éviter la division par zéro ou des valeurs trop proches de zéro
-    if (Math.abs(dz) < 0.01) {
-        point.screen.x = width / 2
-        point.screen.y = height / 2
-        point.screen.w = 0
-        return
-    }
-
-    const scale = cameraDepth / dz
-    point.screen.x = Math.round(
-        width / 2 + (scale * point.camera.x * width) / 2
-    )
-    point.screen.y = Math.round(
-        height / 2 - (scale * point.camera.y * height) / 2
-    )
-    point.screen.w = Math.abs((scale * roadWidth * width) / 2)
-}
-
-function getRoadCurveOffset(road: Segment[], z: number) {
-    // On part du début du circuit
-    let x = 0
-    let dx = 0
-    const segIndex = Math.floor(z / SEGMENT_LENGTH)
-
-    for (let i = 0; i < segIndex; i++) {
-        const s = road[i % road.length]
-        x += dx
-        dx += s.curve
-    }
-    return x
-}
-
-function getRoadCurveOffsetDelta(road: Segment[], fromZ: number, toZ: number) {
-    // fromZ et toZ sont les positions Z du scroll caméra et du décor
-    let x = 0
-    let dx = 0
-    const fromIndex = Math.floor(fromZ / SEGMENT_LENGTH)
-    const toIndex = Math.floor(toZ / SEGMENT_LENGTH)
-
-    for (let i = fromIndex; i < toIndex; i++) {
-        const s = road[i % road.length]
-        x += dx
-        dx += s.curve
-    }
-    return x
-}
-
-// Fonction pour interpoler en douceur entre les courbes des segments
-function getInterpolatedCurve(road: Segment[], z: number) {
-    const segmentIndex = Math.floor(z / SEGMENT_LENGTH)
-    const segmentProgress = (z % SEGMENT_LENGTH) / SEGMENT_LENGTH
-
-    if (segmentIndex >= road.length - 1) {
-        return road[road.length - 1].curve
-    }
-
-    const currentSegment = road[segmentIndex]
-    const nextSegment = road[segmentIndex + 1]
-
-    // Interpolation en cosinus pour une transition plus douce
-    const t = (1 - Math.cos(segmentProgress * Math.PI)) / 2
-    return currentSegment.curve * (1 - t) + nextSegment.curve * t
-}
-
 export class PixiRoadRashEngine {
     private app: Application | null = null
     private container: HTMLElement | null = null
     private paused: boolean = false
+
+    private debugText: Text | null = null
+    private showDebug: boolean = true
 
     // Game state
     private player: PlayerState
@@ -548,6 +237,23 @@ export class PixiRoadRashEngine {
         this.pauseText.visible = false
         root.addChild(this.pauseText)
 
+        /** DEBUG */
+        this.debugText = new Text({
+            text: "",
+            style: {
+                fontFamily: "Consolas, monospace",
+                fontSize: 18,
+                fill: 0xffcc00,
+                align: "left",
+                stroke: 0x222222,
+            },
+        })
+        this.debugText.anchor.set(0, 0)
+        this.debugText.x = 14
+        this.debugText.y = 54
+        this.debugText.visible = this.showDebug
+        root.addChild(this.debugText)
+
         // Décor aléatoire - beaucoup plus d'éléments pour la route longue
         this.sceneryItems = []
         for (let i = 0; i < 500; i++) {
@@ -581,7 +287,9 @@ export class PixiRoadRashEngine {
 
     private handleResize = () => {
         if (!this.app) return
+
         this.app.renderer.resize(window.innerWidth, window.innerHeight)
+
         if (this.backgroundSprite) {
             this.backgroundSprite.width = window.innerWidth
             this.backgroundSprite.height = window.innerHeight
@@ -623,11 +331,18 @@ export class PixiRoadRashEngine {
             this.paused = !this.paused
             return
         }
+
+        if (e.key === "d" || e.key === "D") {
+            this.showDebug = !this.showDebug
+            if (this.debugText) this.debugText.visible = this.showDebug
+        }
+
         if (e.key === "ArrowLeft") this.player.isMovingLeft = true
         if (e.key === "ArrowRight") this.player.isMovingRight = true
         if (e.key === "ArrowUp") this.isAccelerating = true
         if (e.key === "ArrowDown") this.isBraking = true
     }
+
     private handleKeyUp = (e: KeyboardEvent) => {
         if (e.key === "ArrowLeft") this.player.isMovingLeft = false
         if (e.key === "ArrowRight") this.player.isMovingRight = false
@@ -637,6 +352,7 @@ export class PixiRoadRashEngine {
 
     private update = (ticker: Ticker) => {
         if (this.paused || this.finished) return
+
         const deltaTime = ticker.deltaTime / 60
 
         // Vitesse
@@ -647,9 +363,16 @@ export class PixiRoadRashEngine {
                 MAX_SPEED
             )
         else if (this.isBraking)
-            nextSpeed = Math.max(ROAD_SPEED, this.speed - BRAKE * deltaTime)
+            nextSpeed = Math.max(MIN_SPEED, this.speed - BRAKE * deltaTime)
         this.speed = nextSpeed
         const speedFactor = nextSpeed / ROAD_SPEED
+
+        if (!this.isAccelerating && !this.isBraking) {
+            nextSpeed = Math.max(
+                MIN_SPEED,
+                this.speed - AUTO_DECELERATION * deltaTime
+            )
+        }
 
         // Trouver le segment actuel du joueur
         const currentSegmentIndex =
@@ -715,9 +438,28 @@ export class PixiRoadRashEngine {
             ROAD_WIDTH / 2
         )
 
+        // Juste après avoir bougé le joueur:
+        const cameraDepth = 1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
+        const playerZ = this.scrollPos + PLAYER_Z
+        const { roadLeft, roadRight } = getProjectedRoadBordersAtPlayer(
+            this.road,
+            this.scrollPos,
+            playerZ,
+            cameraDepth,
+            window.innerWidth,
+            window.innerHeight,
+            ROAD_WIDTH
+        )
+        const playerCenterX = this.player.x + PLAYER_WIDTH / 2
+
+        // Teste “off road” avec ces bords-là :
+        this.player.isOffRoad =
+            playerCenterX < roadLeft || playerCenterX > roadRight
+
         // Scroll route (NE DÉPASSE PAS la fin du circuit)
         const maxScroll = (this.road.length - DRAW_DISTANCE) * SEGMENT_LENGTH
         this.scrollPos += nextSpeed * deltaTime
+
         if (this.scrollPos >= maxScroll) {
             this.scrollPos = maxScroll
             this.speed = 0
@@ -755,6 +497,7 @@ export class PixiRoadRashEngine {
 
     private draw() {
         if (!this.graphics) return
+
         const g = this.graphics
         g.clear()
 
@@ -1400,6 +1143,66 @@ export class PixiRoadRashEngine {
             // Cacher les textes quand le jeu n'est pas terminé
             if (this.victoryText) this.victoryText.visible = false
             if (this.restartText) this.restartText.visible = false
+        }
+
+        if (this.debugText && this.showDebug) {
+            // Calcul des données utiles pour debug :
+            const screenW = window.innerWidth
+            const routeCenterX = screenW / 2
+            // Route visuelle à la position du joueur :
+            // (Dans updatePlayerPosition tu passes routeCenterX, roadWidthAtPlayer)
+            // Recalcule ici pour vérification (tu pourrais exposer la fonction)
+
+            // Trouver le segment “sous” le joueur :
+            const playerZ = this.scrollPos + PLAYER_Z
+            const segIndex =
+                Math.floor(playerZ / SEGMENT_LENGTH) % this.road.length
+            const seg = this.road[segIndex]
+            const curve = seg.curve
+
+            // Calculer la largeur route à la position du joueur (cf. projection)
+            // Ici ROAD_WIDTH / 2 car c’est ce que tu passes en “logique” dans updatePlayerPosition
+            const roadWidthAtPlayer = ROAD_WIDTH / 2
+
+            // Centre du joueur (pour test collision/bordure)
+            const playerCenterX = this.player.x + PLAYER_WIDTH / 2
+
+            // Limites de la route (mêmes calculs que dans updatePlayerPosition)
+            const roadMinX = routeCenterX - roadWidthAtPlayer
+            const roadMaxX = routeCenterX + roadWidthAtPlayer
+
+            if (this.showDebug && this.graphics) {
+                g.moveTo(roadMinX, screenH - 50)
+                g.lineTo(roadMinX, screenH)
+                g.stroke({ color: 0xff0000, width: 2 })
+
+                g.moveTo(roadMaxX, screenH - 50)
+                g.lineTo(roadMaxX, screenH)
+                g.stroke({ color: 0xff0000, width: 2 })
+            }
+
+            // Pourcentage position du joueur sur la largeur de la route (0 = gauche, 1 = droite)
+            const posPct = (
+                (playerCenterX - roadMinX) /
+                (roadMaxX - roadMinX)
+            ).toFixed(3)
+
+            this.debugText.text =
+                `X: ${this.player.x.toFixed(1)} | Y: ${this.player.y.toFixed(
+                    1
+                )}\n` +
+                `Player center X: ${playerCenterX.toFixed(1)}\n` +
+                `Road min X: ${roadMinX.toFixed(1)} | max X: ${roadMaxX.toFixed(
+                    1
+                )}\n` +
+                `Position sur la route: ${(Number(posPct) * 100).toFixed(
+                    1
+                )} %\n` +
+                `Segment: ${segIndex} / ${this.road.length} | courbe: ${curve}\n` +
+                `Offroad: ${this.player.isOffRoad ? "OUI" : "non"}\n` +
+                `Scroll: ${this.scrollPos.toFixed(
+                    0
+                )} | Speed: ${this.speed.toFixed(0)}`
         }
     }
 

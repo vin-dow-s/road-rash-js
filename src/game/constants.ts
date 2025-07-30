@@ -19,7 +19,12 @@ export const ROAD_MAX_WIDTH = 1700 // largeur max visuelle proche joueur
 export const RUMBLE_LENGTH = 3 // nombre de segments entre chaque bordure
 export const LANE_COUNT = 3 // nombre de voies pour le joueur
 
-export const CURVE_SCALE = 400 // facteur d'intensité des virages (affichage)
+// --- CAMERA DEADZONE ROAD RASH ---
+export const CAMERA_DEADZONE = 100 // Zone neutre où la caméra ne bouge pas (pixels)
+export const CAMERA_OFFSET_MAX = 300 // Décalage maximum de la caméra (pixels)
+export const CAMERA_SMOOTH = 0.1 // Lissage de la caméra (plus bas = plus smooth)
+
+export const CURVE_SCALE = 200 // facteur d'intensité des virages (affichage)
 export const CENTRIFUGAL_FORCE = 0.15 // force centrifuge dans les virages (réduite de moitié)
 
 // --- PERSPECTIVE & BROUILLARD ---
@@ -71,12 +76,14 @@ export const ROAD = {
 }
 
 // --- GAMEPLAY & PHYSIQUE ---
-export const MAX_SPEED = SEGMENT_LENGTH / STEP // vitesse max multipliée par 4 pour sensation Road Rash extrême
-export const ACCELERATION = MAX_SPEED // accélération progressive mais puissante
-export const BRAKE = MAX_SPEED * 1.8 // frein plus efficace
-export const OFF_ROAD_DECEL = -MAX_SPEED / 1.5 // décélération hors route plus forte
+export const MAX_SPEED = (SEGMENT_LENGTH / STEP) * 1.5 // vitesse max beaucoup plus élevée pour sensation Road Rash extrême
+export const ACCELERATION = MAX_SPEED * 2 // accélération puissante mais progressive
+export const BRAKE = MAX_SPEED * 1.2 // frein efficace
+export const AUTO_DECELERATION = MAX_SPEED * 0.3 // décélération automatique plus douce et plus lente
+export const OFF_ROAD_DECEL = MAX_SPEED * 1.5 // décélération hors route brutale
 export const OFF_ROAD_LIMIT = MAX_SPEED / 3 // vitesse max hors route
-export const ROAD_SPEED = 7500 // vitesse de croisière plus élevée pour sensation de vitesse
+export const ROAD_SPEED = 2000 // vitesse de base pour le calcul du speedFactor
+export const MIN_SPEED = 0 // vitesse minimale du jeu
 
 // --- ENNEMIS / AUTRES ---
 export const MAX_ENEMIES = 4 // Plus d'ennemis pour plus d'action

@@ -10,6 +10,7 @@ export interface PlayerState {
     isMovingLeft: boolean
     isMovingRight: boolean
     rotation: number
+    isOffRoad: boolean
 }
 
 /**
@@ -23,6 +24,7 @@ export function createPlayerState(): PlayerState {
         isMovingLeft: false,
         isMovingRight: false,
         rotation: 0,
+        isOffRoad: false,
     }
 }
 
@@ -42,16 +44,26 @@ export function updatePlayerPosition(
     let newX = playerState.x
     const movement = playerState.speed * deltaTime
 
-    // Limites dynamiques
-    const minX = roadCenterX - roadWidthAtPlayer
-    const maxX = roadCenterX + roadWidthAtPlayer - PLAYER_WIDTH
+    // Limites d'écran absolues (priorité sur les limites de route)
+    const screenMinX = 0
+    const screenMaxX = window.innerWidth - PLAYER_WIDTH
 
-    if (playerState.isMovingLeft) {
-        newX = Math.max(minX, newX - movement)
-    }
-    if (playerState.isMovingRight) {
-        newX = Math.min(maxX, newX + movement)
-    }
+    // Le mouvement latéral est géré dans GameEngine maintenant
+    // Cette fonction ne gère que les limites d'écran et la détection hors route
+
+    // newX est déjà défini à playerState.x, pas de mouvement ici
+    // Appliquer les limites d'écran en priorité
+    newX = Math.max(screenMinX, Math.min(screenMaxX, newX))
+
+    // Calculer le "centre" du joueur (milieu du sprite)
+    const playerCenterX = newX + PLAYER_WIDTH / 2
+
+    // Limites visuelles de la route (bord gauche/droit)
+    const roadMinX = roadCenterX - roadWidthAtPlayer
+    const roadMaxX = roadCenterX + roadWidthAtPlayer
+
+    // Détecter si le joueur est hors route
+    const isOffRoad = playerCenterX < roadMinX || playerCenterX > roadMaxX
 
     // Calcul de la rotation
     const targetRotation = playerState.isMovingLeft
@@ -71,5 +83,6 @@ export function updatePlayerPosition(
         ...playerState,
         x: newX,
         rotation: newRotation,
+        isOffRoad: isOffRoad,
     }
 }
