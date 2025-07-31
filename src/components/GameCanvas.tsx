@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from "react"
-import { PixiRoadRashEngine } from "../game/GameEngine"
+import { GameEngine } from "../game/GameEngine3"
 
 export default function GameCanvas() {
     const containerRef = useRef<HTMLDivElement>(null)
-    const engineRef = useRef<PixiRoadRashEngine | null>(null)
+    const engineRef = useRef<GameEngine | null>(null)
     const isInitializingRef = useRef<boolean>(false)
 
     useEffect(() => {
@@ -20,7 +20,7 @@ export default function GameCanvas() {
             try {
                 isInitializingRef.current = true
 
-                const engine = new PixiRoadRashEngine()
+                const engine = new GameEngine()
                 engineRef.current = engine
 
                 await engine.init(containerRef.current)

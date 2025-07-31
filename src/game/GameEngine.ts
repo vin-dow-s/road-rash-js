@@ -21,13 +21,10 @@ import {
     DASH_LENGTH_SEGMENTS,
     DIRT_BORDER,
     DRAW_DISTANCE,
-    ENEMY_SPAWN_RATE,
     FIELD_OF_VIEW,
     HORIZON,
-    MAX_ENEMIES,
     MAX_SPEED,
     MIN_SPEED,
-    MOTO_COLORS,
     PLAYER_LANES,
     PLAYER_LOOK_AHEAD_SEGMENTS,
     PLAYER_MOVE_SPEED,
@@ -52,10 +49,7 @@ import {
     PLAYER_WIDTH,
     updatePlayerPosition,
 } from "./Player"
-import {
-    getProjectedRoadBordersAtPlayerSynced,
-    project3D,
-} from "./utils/projection"
+import { getRoadScreenBorders, project3D } from "./utils/projection"
 import { getRoadCurveOffsetDelta, type Point } from "./utils/roadCurve"
 import { buildRoadSegments } from "./utils/roadGeneration"
 
@@ -121,6 +115,7 @@ export class PixiRoadRashEngine {
         this.player = createPlayerState()
         this.speed = ROAD_SPEED
         this.scrollPos = 0
+        this.player.x = 0
     }
 
     public async init(container: HTMLElement) {
@@ -342,37 +337,17 @@ export class PixiRoadRashEngine {
 
         // Test de démonstration offroad (touche T pour droite, Y pour gauche)
         if (e.key === "t" || e.key === "T") {
-            // Forcer le joueur temporairement hors route côté droit
-            this.player.x = window.innerWidth * 0.9
+            // Va tout à droite du monde route logique
+            this.player.x = (ROAD_WIDTH / 2) * 1.1
         }
-
         if (e.key === "y" || e.key === "Y") {
-            // Forcer le joueur temporairement hors route côté gauche
-            this.player.x = -PLAYER_WIDTH / 2
+            // Va tout à gauche du monde route logique
+            this.player.x = -(ROAD_WIDTH / 2) * 1.1
         }
 
-        // Recentrer le joueur (touche C)
         // Recentrer le joueur (touche C)
         if (e.key === "c" || e.key === "C") {
-            // Utilise la même logique que pour le offroad !
-            const cameraDepth =
-                1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
-            const playerZ = this.scrollPos + PLAYER_Z
-            const { roadLeft, roadRight } =
-                getProjectedRoadBordersAtPlayerSynced(
-                    this.road,
-                    this.scrollPos,
-                    playerZ,
-                    cameraDepth,
-                    window.innerWidth,
-                    window.innerHeight,
-                    ROAD_WIDTH,
-                    this.player.x,
-                    PLAYER_WIDTH,
-                    this.cameraSmoothing
-                )
-            const roadCenter = (roadLeft + roadRight) / 2
-            this.player.x = roadCenter - PLAYER_WIDTH / 2
+            this.player.x = 0
         }
 
         if (e.key === "ArrowLeft") this.player.isMovingLeft = true
@@ -435,6 +410,11 @@ export class PixiRoadRashEngine {
             this.road.length
         const playerSegment = this.road[currentSegmentIndex]
 
+        // Clamp pour éviter de sortir de l'univers (optionnel)
+        const maxPlayerX = (ROAD_WIDTH / 2) * 0.95
+        if (this.player.x < -maxPlayerX) this.player.x = -maxPlayerX
+        if (this.player.x > maxPlayerX) this.player.x = maxPlayerX
+
         // Déplacement latéral plus doux
         const moveSpeed = PLAYER_MOVE_SPEED * deltaTime * (speedFactor / 5)
         if (this.player.isMovingLeft) {
@@ -489,31 +469,25 @@ export class PixiRoadRashEngine {
         this.player = updatePlayerPosition(this.player, deltaTime)
 
         // Juste après avoir bougé le joueur:
-        const cameraDepth = 1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
         const playerZ = this.scrollPos + PLAYER_Z
+        const cameraDepth = 1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
 
-        const { roadLeft, roadRight } = getProjectedRoadBordersAtPlayerSynced(
-            this.road,
-            this.scrollPos,
+        const { left: roadLeft, right: roadRight } = getRoadScreenBorders(
+            0, // x=0 = centre logique de la route (la route, pas le joueur)
+            playerZ,
+            this.player.x, // camX = position du joueur
+            CAMERA_HEIGHT,
             playerZ,
             cameraDepth,
             window.innerWidth,
             window.innerHeight,
-            ROAD_WIDTH,
-            this.player.x,
-            PLAYER_WIDTH,
-            this.cameraSmoothing
+            ROAD_WIDTH
         )
 
-        const playerLeftEdge = this.player.x
-        const playerRightEdge = this.player.x + PLAYER_WIDTH
-        const tolerance = 6
-        const routeMin = roadLeft + tolerance
-        const routeMax = roadRight - tolerance
+        const routeHalfWidth = (roadRight - roadLeft) / 2
 
-        // S'il n'y a PAS de chevauchement
-        this.player.isOffRoad =
-            playerRightEdge < routeMin || playerLeftEdge > routeMax
+        // 3. Si player.x dépasse ±routeHalfWidth -> offroad !
+        this.player.isOffRoad = Math.abs(this.player.x) > routeHalfWidth * 0.98
 
         // Scroll route (NE DÉPASSE PAS la fin du circuit)
         const maxScroll = (this.road.length - DRAW_DISTANCE) * SEGMENT_LENGTH
@@ -524,32 +498,6 @@ export class PixiRoadRashEngine {
             this.speed = 0
             this.finished = true // ARRIVÉE !
         }
-
-        // Ennemis
-        if (
-            this.lastEnemySpawn > ENEMY_SPAWN_RATE &&
-            this.enemies.length < MAX_ENEMIES &&
-            !this.finished
-        ) {
-            this.enemies.push({
-                id: Date.now() + Math.random(),
-                z: 0.08 + Math.random() * 0.1, // Position de spawn plus variée
-                lane: Math.floor(Math.random() * 3) - 1,
-                color: MOTO_COLORS[
-                    Math.floor(Math.random() * MOTO_COLORS.length)
-                ],
-                speed: (0.7 + Math.random() * 0.6) * speedFactor, // Vitesse des ennemis plus élevée et variable
-            })
-            this.lastEnemySpawn = 0
-        }
-        this.enemies = this.enemies
-            .map((enemy) => ({
-                ...enemy,
-                z: enemy.z + enemy.speed * deltaTime,
-            }))
-            .filter((enemy) => enemy.z < 1.4) // Distance plus éloignée pour voir les ennemis plus longtemps
-
-        this.lastEnemySpawn += deltaTime
 
         this.draw()
     }
@@ -607,6 +555,8 @@ export class PixiRoadRashEngine {
         dx += firstSegment.curve * (1 - currentSegmentProgress)
         x += dx
 
+        const cameraX = this.player.x // La position du joueur sur la route EN COORDONNÉES ROUTE
+
         for (let n = 0; n < DRAW_DISTANCE; n++) {
             const segmentIndex = baseSegmentIndex + n
             if (segmentIndex >= this.road.length) break
@@ -621,9 +571,14 @@ export class PixiRoadRashEngine {
             segment.p2.world.x = x + dx
 
             // Projection 3D
+            // Nouveau : point de fuite centré, décalage monde selon le joueur
+            const playerOffset =
+                (this.player.x + PLAYER_WIDTH / 2 - screenW / 2) /
+                (ROAD_WIDTH / 2)
+
             project3D(
                 segment.p1,
-                (playerRoadX * ROAD_WIDTH) / 2,
+                cameraX,
                 CAMERA_HEIGHT,
                 camZ,
                 cameraDepth,
@@ -633,7 +588,7 @@ export class PixiRoadRashEngine {
             )
             project3D(
                 segment.p2,
-                playerRoadX * (ROAD_WIDTH / 2),
+                cameraX,
                 CAMERA_HEIGHT,
                 camZ,
                 cameraDepth,
@@ -1118,9 +1073,12 @@ export class PixiRoadRashEngine {
                 camera: { x: 0, y: 0, z: 0 },
                 screen: { x: 0, y: 0, w: 0 },
             }
+
+            const cameraX = this.player.x // La position du joueur sur la route EN COORDONNÉES ROUTE
+
             project3D(
                 point,
-                (playerRoadX * ROAD_WIDTH) / 2,
+                cameraX,
                 CAMERA_HEIGHT,
                 camZ,
                 cameraDepth,
@@ -1222,21 +1180,19 @@ export class PixiRoadRashEngine {
         g.rect(18, 21, gaugeWidth * pulseScale, 3)
         g.fill({ color: 0xffffff, alpha: 0.4 })
 
-        // Ombre du joueur
-        if (this.playerSprite) {
-            const shadowX = this.player.x + PLAYER_WIDTH / 2
-            const shadowY = this.player.y + PLAYER_HEIGHT * 0.9
-
-            // Ellipse d'ombre floue
-            g.ellipse(shadowX, shadowY, PLAYER_WIDTH / 5, PLAYER_HEIGHT * 0.1)
-            g.fill({ color: 0x000000, alpha: 0.3 }) // Noir semi-transparent
-        }
-
         // Player sprite (centré)
         if (this.playerSprite) {
-            this.playerSprite.x = this.player.x + PLAYER_WIDTH / 2
+            this.playerSprite.x = screenW / 2
             this.playerSprite.y = this.player.y + PLAYER_HEIGHT / 2
             this.playerSprite.rotation = this.currentTilt
+        }
+
+        // Ombre du joueur
+        if (this.playerSprite) {
+            const shadowX = screenW / 2
+            const shadowY = this.player.y + PLAYER_HEIGHT * 0.92
+            g.ellipse(shadowX, shadowY, PLAYER_WIDTH / 5, PLAYER_HEIGHT * 0.1)
+            g.fill({ color: 0x000000, alpha: 0.32 })
         }
 
         // Écran de victoire quand le jeu est terminé
@@ -1281,31 +1237,30 @@ export class PixiRoadRashEngine {
             // Calcul des données utiles pour debug :
             const screenW = window.innerWidth
 
+            // Largeur de route à la position du joueur
             const playerZ = this.scrollPos + PLAYER_Z
             const cameraDepth =
                 1 / Math.tan(((FIELD_OF_VIEW / 2) * Math.PI) / 180)
-            const { roadLeft, roadRight } =
-                getProjectedRoadBordersAtPlayerSynced(
-                    this.road,
-                    this.scrollPos,
-                    playerZ,
-                    cameraDepth,
-                    screenW,
-                    screenH,
-                    ROAD_WIDTH,
-                    this.player.x,
-                    PLAYER_WIDTH,
-                    this.cameraSmoothing
-                )
+            const { left: roadLeft, right: roadRight } = getRoadScreenBorders(
+                0, // x=0 = centre logique de la route (la route, pas le joueur)
+                playerZ,
+                this.player.x, // camX = position du joueur
+                CAMERA_HEIGHT,
+                playerZ,
+                cameraDepth,
+                window.innerWidth,
+                window.innerHeight,
+                ROAD_WIDTH
+            )
+            // Player is offroad si il sort de la route (en coordonnées monde route)
+            const logicalHalfRoad = (ROAD_WIDTH / 2) * 0.95
+            this.player.isOffRoad = Math.abs(this.player.x) > logicalHalfRoad // ou .9 pour tolérance
 
             // Trouver le segment “sous” le joueur :
             const segIndex =
                 Math.floor(playerZ / SEGMENT_LENGTH) % this.road.length
             const seg = this.road[segIndex]
             const curve = seg.curve
-
-            // Calculer la largeur route à la position du joueur (cf. projection)
-            const roadWidthAtPlayer = ROAD_WIDTH / 2
 
             // Centre du joueur (pour test collision/bordure)
             const playerCenterX = this.player.x + PLAYER_WIDTH / 2
@@ -1346,8 +1301,9 @@ export class PixiRoadRashEngine {
                 g.stroke()
 
                 // Hitbox du joueur (rectangle rouge)
-                const playerLeftEdge = this.player.x
-                const playerRightEdge = this.player.x + PLAYER_WIDTH
+                const playerLeftEdge = screenW / 2 - PLAYER_WIDTH / 2
+                const playerRightEdge = screenW / 2 + PLAYER_WIDTH / 2
+
                 const playerTopEdge = this.player.y
                 const playerBottomEdge = this.player.y + PLAYER_HEIGHT
 

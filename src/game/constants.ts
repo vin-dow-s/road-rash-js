@@ -1,21 +1,17 @@
 // --- RENDERING & LOGIC ---
 export const FPS = 60
 export const STEP = 1 / FPS
-
 export const WIDTH = window.innerWidth // largeur logique du canvas
 export const HEIGHT = window.innerHeight
-export const HORIZON = HEIGHT * 0.47 // position verticale de l'horizon
-
 export const FIELD_OF_VIEW = 100 // angle du FOV en degrés (utile si jamais 3d)
 export const CAMERA_HEIGHT = 1000 // hauteur de la caméra au-dessus de la route
 export const PLAYER_Z = CAMERA_HEIGHT * 1.0 // profondeur du joueur derrière la caméra
+export const HORIZON = HEIGHT * 0.47 // position verticale de l'horizon
 
 // --- ROUTE & SEGMENTS ---
+export const ROAD_WIDTH = 1200 // largeur de la route (utilisée partout)
 export const DRAW_DISTANCE = 300 // distance de vue augmentée (2x plus loin)
 export const SEGMENT_LENGTH = 250 // longueur d'un segment (en px ou logique)
-export const ROAD_WIDTH = 1700 // largeur de la route (utilisée partout)
-export const ROAD_MIN_WIDTH = 150 // largeur minimale visuelle à l'horizon
-export const ROAD_MAX_WIDTH = window.innerWidth * 0.92 // largeur max visuelle proche joueur
 export const RUMBLE_LENGTH = 3 // nombre de segments entre chaque bordure
 export const LANE_COUNT = 3 // nombre de voies pour le joueur
 
@@ -23,15 +19,8 @@ export const LANE_COUNT = 3 // nombre de voies pour le joueur
 export const CAMERA_DEADZONE = 100 // Zone neutre où la caméra ne bouge pas (pixels)
 export const CAMERA_OFFSET_MAX = 300 // Décalage maximum de la caméra (pixels)
 export const CAMERA_SMOOTH = 0.1 // Lissage de la caméra (plus bas = plus smooth)
-
 export const CURVE_SCALE = 200 // facteur d'intensité des virages (affichage)
 export const CENTRIFUGAL_FORCE = 0.15 // force centrifuge dans les virages (réduite de moitié)
-
-// --- PERSPECTIVE & BROUILLARD ---
-export const FOG_DENSITY = 8 // densité du brouillard pour l'effet de distance
-export const HORIZON_FADE_START = 5 // à partir de quelle distance commencer le fondu vers l'horizon
-export const ROAD_HORIZON_COLOR = 0x87ceeb // couleur de la route à l'horizon (bleu ciel)
-export const MIN_SEGMENT_WIDTH = 2 // largeur minimale des segments à l'horizon
 
 // --- DÉCOR & BORDURES ---
 export const SCENERY_SCALE_RANGE = {
@@ -76,18 +65,14 @@ export const ROAD = {
 }
 
 // --- GAMEPLAY & PHYSIQUE ---
+export const ROAD_SPEED = 2000 // vitesse de base pour le calcul du speedFactor
 export const MAX_SPEED = (SEGMENT_LENGTH / STEP) * 1.5 // vitesse max beaucoup plus élevée pour sensation Road Rash extrême
 export const ACCELERATION = MAX_SPEED * 2 // accélération puissante mais progressive
 export const BRAKE = MAX_SPEED * 1.2 // frein efficace
-export const AUTO_DECELERATION = MAX_SPEED * 0.3 // décélération automatique plus douce et plus lente
-export const OFF_ROAD_DECEL = MAX_SPEED * 1.5 // décélération hors route brutale
-export const OFF_ROAD_LIMIT = MAX_SPEED / 3 // vitesse max hors route
-export const ROAD_SPEED = 2000 // vitesse de base pour le calcul du speedFactor
+export const AUTO_DECELERATION = -MAX_SPEED / 5 // décélération automatique plus douce et plus lente
+export const OFF_ROAD_DECEL = -MAX_SPEED / 2 // décélération hors route brutale
+export const OFF_ROAD_LIMIT = MAX_SPEED / 4 // vitesse max hors route
 export const MIN_SPEED = 0 // vitesse minimale du jeu
-
-// --- ENNEMIS / AUTRES ---
-export const MAX_ENEMIES = 4 // Plus d'ennemis pour plus d'action
-export const ENEMY_SPAWN_RATE = 1.8 // Spawn plus fréquent des ennemis
 
 // --- COULEURS ---
 export const ROAD_COLOR = 0x4d4d4d

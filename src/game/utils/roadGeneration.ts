@@ -162,9 +162,12 @@ export function buildRoadSegments(): Segment[] {
 
     // --- CONSTRUCTION DE LA ROUTE LONGUE ET VARIÉE ---
     // Départ avec une ligne droite
-    addStraight(ROAD.LENGTH.SHORT / 4)
+    addStraight(ROAD.LENGTH.VERY_LONG)
+    addStraight(ROAD.LENGTH.VERY_LONG)
+    addStraight(ROAD.LENGTH.VERY_LONG)
+    addStraight(ROAD.LENGTH.VERY_LONG)
 
-    // Section 1: Introduction progressive
+    /*     // Section 1: Introduction progressive
     addSCurves()
     addStraight(ROAD.LENGTH.LONG)
     addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.EASY)
@@ -216,7 +219,7 @@ export function buildRoadSegments(): Segment[] {
     addStraight(ROAD.LENGTH.LONG)
 
     // Ligne d'arrivée
-    addStraight(ROAD.LENGTH.MEDIUM)
+    addStraight(ROAD.LENGTH.MEDIUM) */
 
     return segments
 }
