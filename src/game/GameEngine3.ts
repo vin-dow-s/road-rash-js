@@ -350,20 +350,19 @@ export class GameEngine {
         const root = new Container()
         this.app.stage.addChild(root)
 
-        // Route, décor, HUD...
-        this.graphics = new Graphics()
-        root.addChild(this.graphics)
-
-        // Background
-        const horizonY = this.height / 2
+        // Background en premier pour qu'il soit derrière tout le reste
         if (this.backgroundTexture) {
             this.backgroundSprite = new Sprite(this.backgroundTexture)
-            this.backgroundSprite.width = this.backgroundTexture.width
-            this.backgroundSprite.height = horizonY
+            this.backgroundSprite.width = this.width
+            this.backgroundSprite.height = this.height * 0.8
             this.backgroundSprite.x = 0
             this.backgroundSprite.y = 0
             root.addChild(this.backgroundSprite)
         }
+
+        // Route, décor, HUD...
+        this.graphics = new Graphics()
+        root.addChild(this.graphics)
 
         // Player
         if (this.playerTexture) {
@@ -425,11 +424,9 @@ export class GameEngine {
     private handleResize = () => {
         if (!this.app) return
 
-        this.app.renderer.resize(window.innerWidth, window.innerHeight)
-
-        if (this.backgroundSprite) {
-            this.backgroundSprite.height = window.innerHeight / 2
-        }
+        this.width = window.innerWidth
+        this.height = window.innerHeight
+        this.app.renderer.resize(this.width, this.height)
     }
 
     // ========== Road/State Génération ==========
@@ -519,7 +516,7 @@ export class GameEngine {
         const speedPercent = this.speed / this.maxSpeed
 
         // Nouvelles courbes dynamiques !
-        const centrifugal = 0.3
+        const centrifugal = 1
 
         if (this.keyLeft) this.playerX -= dx
         else if (this.keyRight) this.playerX += dx
@@ -557,13 +554,6 @@ export class GameEngine {
             this.speed *
             dt *
             0.08
-
-        // Fais "boucler" la position si nécessaire
-        if (this.backgroundSprite) {
-            const maxScroll = this.backgroundSprite.width - this.width
-            while (this.bgPosition < 0) this.bgPosition += maxScroll
-            while (this.bgPosition > maxScroll) this.bgPosition -= maxScroll
-        }
     }
 
     // ========== RENDER ==========
@@ -573,14 +563,6 @@ export class GameEngine {
         g.clear()
 
         const horizonY = this.height / 2
-
-        // --- PARALLAX BACKGROUND ---
-        if (this.backgroundSprite) {
-            this.backgroundSprite.x = -this.bgPosition
-            this.backgroundSprite.y = 0
-            this.backgroundSprite.height = horizonY
-            this.backgroundSprite.zIndex = -1
-        }
 
         // Fond : ciel puis herbe
         if (!this.backgroundSprite) {
@@ -611,9 +593,46 @@ export class GameEngine {
 
         // Mise à jour du background avec parallax vertical
         if (this.backgroundSprite) {
-            this.backgroundSprite.y = -playerY * 0.002 // facteur ajustable pour l'effet vertical
+            this.backgroundSprite.y = -playerY * 0.001 // facteur ajustable pour l'effet vertical
         }
 
+        // Trouver le point le plus haut de la route visible
+        let farthestY = horizonY
+        let tempX = 0
+        let tempDx =
+            -((baseSegment.curve || 0) * basePercent) * this.curveFactor
+
+        for (let n = 0; n < this.drawDistance; n++) {
+            let segment =
+                this.segments[(baseSegment.index + n) % this.segments.length]
+
+            // Projeter le segment pour voir sa hauteur à l'écran
+            project(
+                segment.p1,
+                this.playerX * this.roadWidth - tempX,
+                playerY + this.cameraHeight,
+                this.position - (segment.looped ? this.trackLength : 0),
+                this.cameraDepth,
+                this.width,
+                this.height,
+                this.roadWidth
+            )
+
+            // Garder le point le plus haut trouvé
+            if (segment.p1.camera.z > this.cameraDepth) {
+                farthestY = Math.min(farthestY, segment.p1.screen.y)
+            }
+
+            tempX += tempDx
+            tempDx += (segment.curve || 0) * this.curveFactor
+        }
+
+        // Dessiner l'herbe jusqu'à la hauteur exacte de la route
+        g.fill(COLORS.LIGHT.grass)
+        g.rect(0, farthestY, this.width, this.height - farthestY)
+        g.endFill()
+
+        // Initialiser pour le rendu de la route
         let maxy = this.height
         let x = 0
         let dx = -((baseSegment.curve || 0) * basePercent) * this.curveFactor
