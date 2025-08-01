@@ -1,5 +1,3 @@
-// GameEngine.ts - Jake Gordon Racer v1 adapté à Pixi.js + TypeScript
-
 import * as PIXI from "pixi.js"
 import {
     Application,
@@ -29,6 +27,7 @@ type Segment = {
     color: SegmentColor
     fog?: number
     looped?: boolean
+    curve?: number
 }
 
 // ======= Couleurs / Settings =======
@@ -50,12 +49,12 @@ const DEFAULTS = {
     width: window.innerWidth,
     height: window.innerHeight,
     lanes: 3,
-    roadWidth: 2000,
+    roadWidth: 1200,
     segmentLength: 200,
     rumbleLength: 3,
-    cameraHeight: 1000,
-    drawDistance: 300,
-    fogDensity: 5,
+    cameraHeight: 750,
+    drawDistance: 500,
+    fogDensity: 2.5,
     fieldOfView: 100,
     fps: 60,
 }
@@ -134,13 +133,15 @@ export class GameEngine {
     private speed: number = 200 // Démarrage lent pour voir la route !
     private playerX: number = 0
     private backgroundSprite: Sprite | null = null
+    private bgPosition: number = 0
     private playerSprite: Sprite | null = null
+    private playerTilt: number = 0
 
     private backgroundTexture: Texture | null = null
     private playerTexture: Texture | null = null
 
-    private playerWidth = 175
-    private playerHeight = 175
+    private playerWidth = 250
+    private playerHeight = 250
 
     // Contrôles
     private keyLeft: boolean = false
@@ -151,6 +152,73 @@ export class GameEngine {
     // Loop
     private rafId: number = 0
     private lastTs: number = 0
+
+    // Curves
+    private addSegment(curve: number = 0) {
+        const n = this.segments.length
+        this.segments.push({
+            index: n,
+            p1: {
+                world: { x: 0, y: 0, z: n * this.segmentLength },
+                camera: { x: 0, y: 0, z: 0 },
+                screen: { x: 0, y: 0, w: 0, scale: 0 },
+            },
+            p2: {
+                world: { x: 0, y: 0, z: (n + 1) * this.segmentLength },
+                camera: { x: 0, y: 0, z: 0 },
+                screen: { x: 0, y: 0, w: 0, scale: 0 },
+            },
+            color: {
+                road: COLORS.LIGHT.road,
+                grass: COLORS.LIGHT.grass,
+                rumble: 0x5c3c24,
+                lane: 0xffffff,
+            },
+            curve,
+        })
+    }
+
+    private addRoad(enter: number, hold: number, leave: number, curve: number) {
+        for (let n = 0; n < enter; n++)
+            this.addSegment(this.easeIn(0, curve, n / enter))
+        for (let n = 0; n < hold; n++) this.addSegment(curve)
+        for (let n = 0; n < leave; n++)
+            this.addSegment(this.easeInOut(curve, 0, n / leave))
+    }
+
+    // Easing helpers
+    private easeIn(a: number, b: number, percent: number) {
+        return a + (b - a) * Math.pow(percent, 2)
+    }
+    private easeInOut(a: number, b: number, percent: number) {
+        return a + (b - a) * (-Math.cos(percent * Math.PI) / 2 + 0.5)
+    }
+
+    // Préréglages façon Jake
+    private ROAD = {
+        LENGTH: { NONE: 0, SHORT: 80, MEDIUM: 180, LONG: 320 },
+        CURVE: { NONE: 0, EASY: 0.6, MEDIUM: 1.2, HARD: 2 },
+    }
+
+    private curveFactor = 0.3
+
+    private addStraight(num = this.ROAD.LENGTH.MEDIUM) {
+        this.addRoad(num, num, num, 0)
+    }
+
+    private addCurve(
+        num = this.ROAD.LENGTH.MEDIUM,
+        curve = this.ROAD.CURVE.MEDIUM
+    ) {
+        this.addRoad(num, num, num, curve)
+    }
+
+    private addSCurves() {
+        this.addCurve(this.ROAD.LENGTH.LONG, -this.ROAD.CURVE.EASY)
+        this.addStraight(this.ROAD.LENGTH.MEDIUM)
+        this.addCurve(this.ROAD.LENGTH.LONG, this.ROAD.CURVE.EASY)
+        this.addStraight(this.ROAD.LENGTH.MEDIUM)
+    }
 
     constructor() {}
 
@@ -201,7 +269,7 @@ export class GameEngine {
         const horizonY = this.height / 2
         if (this.backgroundTexture) {
             this.backgroundSprite = new Sprite(this.backgroundTexture)
-            this.backgroundSprite.width = this.width
+            this.backgroundSprite.width = this.backgroundTexture.width
             this.backgroundSprite.height = horizonY
             this.backgroundSprite.x = 0
             this.backgroundSprite.y = 0
@@ -271,33 +339,38 @@ export class GameEngine {
         this.app.renderer.resize(window.innerWidth, window.innerHeight)
 
         if (this.backgroundSprite) {
-            this.backgroundSprite.width = window.innerWidth
-            this.backgroundSprite.height = window.innerHeight
+            this.backgroundSprite.height = window.innerHeight / 2
         }
     }
 
     // ========== Road/State Génération ==========
     private reset() {
         this.segments = []
-        for (let n = 0; n < 500; n++) {
-            this.segments.push({
-                index: n,
-                p1: {
-                    world: { x: 0, y: 0, z: n * this.segmentLength },
-                    camera: { x: 0, y: 0, z: 0 },
-                    screen: { x: 0, y: 0, w: 0, scale: 0 },
-                },
-                p2: {
-                    world: { x: 0, y: 0, z: (n + 1) * this.segmentLength },
-                    camera: { x: 0, y: 0, z: 0 },
-                    screen: { x: 0, y: 0, w: 0, scale: 0 },
-                },
-                color:
-                    Math.floor(n / this.rumbleLength) % 2
-                        ? COLORS.DARK
-                        : COLORS.LIGHT,
-            })
-        }
+
+        // Démarre avec une courte ligne droite
+        this.addStraight(this.ROAD.LENGTH.SHORT / 2)
+
+        // 1 long virage gauche
+        this.addCurve(this.ROAD.LENGTH.LONG * 1.2, -this.ROAD.CURVE.EASY)
+
+        // Grande ligne droite pour relâcher la tension
+        this.addStraight(this.ROAD.LENGTH.LONG * 1.5)
+
+        // 1 long virage droite
+        this.addCurve(this.ROAD.LENGTH.LONG * 1.2, this.ROAD.CURVE.MEDIUM)
+
+        // Encore une longue droite
+        this.addStraight(this.ROAD.LENGTH.LONG * 2)
+
+        // Quelques enchaînements (mais moins, et plus longs)
+        this.addCurve(this.ROAD.LENGTH.LONG, -this.ROAD.CURVE.EASY)
+        this.addStraight(this.ROAD.LENGTH.MEDIUM)
+        this.addCurve(this.ROAD.LENGTH.LONG, this.ROAD.CURVE.EASY)
+
+        // Finir par une longue ligne droite
+        this.addStraight(this.ROAD.LENGTH.LONG * 2)
+
+        // START/FINISH colors etc (comme avant)
         this.segments[this.findSegment(this.playerZ).index + 2].color =
             COLORS.START
         this.segments[this.findSegment(this.playerZ).index + 3].color =
@@ -309,7 +382,7 @@ export class GameEngine {
         this.cameraDepth =
             1 / Math.tan(((this.fieldOfView / 2) * Math.PI) / 180)
         this.playerZ = this.cameraHeight * this.cameraDepth
-        this.maxSpeed = this.segmentLength / (1 / this.fps)
+        this.maxSpeed = (this.segmentLength / (1 / this.fps)) * 5
         this.accel = this.maxSpeed / 5
         this.breaking = -this.maxSpeed
         this.decel = -this.maxSpeed / 5
@@ -345,8 +418,19 @@ export class GameEngine {
         )
         const dx = dt * 2 * (this.speed / this.maxSpeed)
 
+        const playerSegment = this.findSegment(this.position + this.playerZ)
+        const speedPercent = this.speed / this.maxSpeed
+
+        // Nouvelles courbes dynamiques !
+        const centrifugal = 0.3
+
         if (this.keyLeft) this.playerX -= dx
         else if (this.keyRight) this.playerX += dx
+
+        // Effet centrifuge : la courbe te pousse vers l’extérieur
+        if (playerSegment.curve)
+            this.playerX -=
+                dx * speedPercent * playerSegment.curve * centrifugal
 
         if (this.keyFaster) this.speed = accelerate(this.speed, this.accel, dt)
         else if (this.keySlower)
@@ -361,6 +445,28 @@ export class GameEngine {
 
         this.playerX = clamp(this.playerX, -2, 2)
         this.speed = clamp(this.speed, 0, this.maxSpeed)
+
+        // Parallax background movement
+        const playerInfluence = 0.005 // ajuste ce facteur pour l'effet "Outrun"
+        const curveInfluence = 0.01 // ajuste ce facteur pour la force du virage sur le décor
+
+        const playerMove = this.playerX * playerInfluence
+        const currentSegment = this.findSegment(this.position)
+        const currentCurve = currentSegment.curve || 0
+
+        // Vitesse de défilement du bg : le virage principal + déplacement joueur
+        this.bgPosition +=
+            (currentCurve * curveInfluence + playerMove) *
+            this.speed *
+            dt *
+            0.08
+
+        // Fais "boucler" la position si nécessaire
+        if (this.backgroundSprite) {
+            const maxScroll = this.backgroundSprite.width - this.width
+            while (this.bgPosition < 0) this.bgPosition += maxScroll
+            while (this.bgPosition > maxScroll) this.bgPosition -= maxScroll
+        }
     }
 
     // ========== RENDER ==========
@@ -371,20 +477,33 @@ export class GameEngine {
 
         const horizonY = this.height / 2
 
+        // --- PARALLAX BACKGROUND ---
+        if (this.backgroundSprite) {
+            this.backgroundSprite.x = -this.bgPosition
+            this.backgroundSprite.y = 0
+            this.backgroundSprite.height = horizonY
+            this.backgroundSprite.zIndex = -1
+        }
+
         // Fond : ciel puis herbe
         if (!this.backgroundSprite) {
-            g.beginFill(COLORS.SKY)
-            g.drawRect(0, 0, this.width, horizonY)
+            g.fill(COLORS.SKY)
+            g.rect(0, 0, this.width, horizonY)
             g.endFill()
         }
 
         // Herbe, uniquement sous l’horizon
-        g.beginFill(COLORS.LIGHT.grass)
-        g.drawRect(0, horizonY, this.width, this.height - horizonY)
+        g.fill(COLORS.LIGHT.grass)
+        g.rect(0, horizonY, this.width, this.height - horizonY)
         g.endFill()
 
         let baseSegment = this.findSegment(this.position)
+        let basePercent =
+            (this.position % this.segmentLength) / this.segmentLength
         let maxy = this.height
+
+        let x = 0
+        let dx = -((baseSegment.curve || 0) * basePercent) * this.curveFactor
 
         for (let n = 0; n < this.drawDistance; n++) {
             let segment =
@@ -394,7 +513,7 @@ export class GameEngine {
 
             project(
                 segment.p1,
-                this.playerX * this.roadWidth,
+                this.playerX * this.roadWidth - x,
                 this.cameraHeight,
                 this.position - (segment.looped ? this.trackLength : 0),
                 this.cameraDepth,
@@ -404,7 +523,7 @@ export class GameEngine {
             )
             project(
                 segment.p2,
-                this.playerX * this.roadWidth,
+                this.playerX * this.roadWidth - x - dx,
                 this.cameraHeight,
                 this.position - (segment.looped ? this.trackLength : 0),
                 this.cameraDepth,
@@ -412,6 +531,9 @@ export class GameEngine {
                 this.height,
                 this.roadWidth
             )
+
+            x += dx
+            dx += (segment.curve || 0) * this.curveFactor
 
             if (
                 segment.p1.camera.z <= this.cameraDepth ||
@@ -422,7 +544,38 @@ export class GameEngine {
             // Rumble strips
             const r1 = segment.p1.screen.w / Math.max(6, 2 * this.lanes)
             const r2 = segment.p2.screen.w / Math.max(6, 2 * this.lanes)
-            g.beginFill(segment.color.rumble)
+
+            // ---- Flou/terre autour de la bordure marron (externe) ----
+            const earthShadowColor = 0x85603c // un marron plus clair
+            g.fill(earthShadowColor, 0.33) // alpha faible pour effet flou
+            this.polygon(
+                g,
+                segment.p1.screen.x - segment.p1.screen.w - r1 * 1.7,
+                segment.p1.screen.y,
+                segment.p1.screen.x - segment.p1.screen.w + r1 * 0.25,
+                segment.p1.screen.y,
+                segment.p2.screen.x - segment.p2.screen.w + r2 * 0.25,
+                segment.p2.screen.y,
+                segment.p2.screen.x - segment.p2.screen.w - r2 * 1.7,
+                segment.p2.screen.y
+            )
+            g.endFill()
+            g.fill(earthShadowColor, 0.33)
+            this.polygon(
+                g,
+                segment.p1.screen.x + segment.p1.screen.w + r1 * 1.7,
+                segment.p1.screen.y,
+                segment.p1.screen.x + segment.p1.screen.w - r1 * 0.25,
+                segment.p1.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w - r2 * 0.25,
+                segment.p2.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w + r2 * 1.7,
+                segment.p2.screen.y
+            )
+            g.endFill()
+
+            // --- MARRON (bordure extérieure) ---
+            g.fill(segment.color.rumble)
             this.polygon(
                 g,
                 segment.p1.screen.x - segment.p1.screen.w - r1,
@@ -435,7 +588,7 @@ export class GameEngine {
                 segment.p2.screen.y
             )
             g.endFill()
-            g.beginFill(segment.color.rumble)
+            g.fill(segment.color.rumble)
             this.polygon(
                 g,
                 segment.p1.screen.x + segment.p1.screen.w + r1,
@@ -449,17 +602,130 @@ export class GameEngine {
             )
             g.endFill()
 
-            // Road (trapèze)
-            g.beginFill(segment.color.road)
+            // --- DORÉE (bordure fine à l'intérieur du marron) ---
+            const goldWidth1 = r1 * 0.35
+            const goldWidth2 = r2 * 0.35
+
+            // ---- Lueur diffuse dorée (optionnel) ----
+            g.fill(0xb89d70, 0.18)
+            this.polygon(
+                g,
+                segment.p1.screen.x - segment.p1.screen.w - goldWidth1 * 0.6,
+                segment.p1.screen.y,
+                segment.p1.screen.x - segment.p1.screen.w + goldWidth1 * 1.5,
+                segment.p1.screen.y,
+                segment.p2.screen.x - segment.p2.screen.w + goldWidth2 * 1.5,
+                segment.p2.screen.y,
+                segment.p2.screen.x - segment.p2.screen.w - goldWidth2 * 0.6,
+                segment.p2.screen.y
+            )
+            g.endFill()
+            g.fill(0xb89d70, 0.18)
+            this.polygon(
+                g,
+                segment.p1.screen.x + segment.p1.screen.w + goldWidth1 * 0.6,
+                segment.p1.screen.y,
+                segment.p1.screen.x + segment.p1.screen.w - goldWidth1 * 1.5,
+                segment.p1.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w - goldWidth2 * 1.5,
+                segment.p2.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w + goldWidth2 * 0.6,
+                segment.p2.screen.y
+            )
+            g.endFill()
+
+            g.fill(0xb89d70)
             this.polygon(
                 g,
                 segment.p1.screen.x - segment.p1.screen.w,
                 segment.p1.screen.y,
-                segment.p1.screen.x + segment.p1.screen.w,
+                segment.p1.screen.x - segment.p1.screen.w + goldWidth1,
                 segment.p1.screen.y,
-                segment.p2.screen.x + segment.p2.screen.w,
+                segment.p2.screen.x - segment.p2.screen.w + goldWidth2,
                 segment.p2.screen.y,
                 segment.p2.screen.x - segment.p2.screen.w,
+                segment.p2.screen.y
+            )
+            g.endFill()
+            g.fill(0xb89d70)
+            this.polygon(
+                g,
+                segment.p1.screen.x + segment.p1.screen.w,
+                segment.p1.screen.y,
+                segment.p1.screen.x + segment.p1.screen.w - goldWidth1,
+                segment.p1.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w - goldWidth2,
+                segment.p2.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w,
+                segment.p2.screen.y
+            )
+            g.endFill()
+
+            // --- BLANCHE (encore plus fine, à l'intérieur du doré) ---
+            const whiteWidth1 = goldWidth1 * 0.4
+            const whiteWidth2 = goldWidth2 * 0.4
+            g.fill(0xffffff)
+            this.polygon(
+                g,
+                segment.p1.screen.x - segment.p1.screen.w + goldWidth1,
+                segment.p1.screen.y,
+                segment.p1.screen.x -
+                    segment.p1.screen.w +
+                    goldWidth1 +
+                    whiteWidth1,
+                segment.p1.screen.y,
+                segment.p2.screen.x -
+                    segment.p2.screen.w +
+                    goldWidth2 +
+                    whiteWidth2,
+                segment.p2.screen.y,
+                segment.p2.screen.x - segment.p2.screen.w + goldWidth2,
+                segment.p2.screen.y
+            )
+            g.endFill()
+            g.fill(0xffffff)
+            this.polygon(
+                g,
+                segment.p1.screen.x + segment.p1.screen.w - goldWidth1,
+                segment.p1.screen.y,
+                segment.p1.screen.x +
+                    segment.p1.screen.w -
+                    goldWidth1 -
+                    whiteWidth1,
+                segment.p1.screen.y,
+                segment.p2.screen.x +
+                    segment.p2.screen.w -
+                    goldWidth2 -
+                    whiteWidth2,
+                segment.p2.screen.y,
+                segment.p2.screen.x + segment.p2.screen.w - goldWidth2,
+                segment.p2.screen.y
+            )
+            g.endFill()
+
+            // Road (trapèze)
+            g.fill(segment.color.road)
+            this.polygon(
+                g,
+                segment.p1.screen.x -
+                    segment.p1.screen.w +
+                    goldWidth1 +
+                    whiteWidth1,
+                segment.p1.screen.y,
+                segment.p1.screen.x +
+                    segment.p1.screen.w -
+                    goldWidth1 -
+                    whiteWidth1,
+                segment.p1.screen.y,
+                segment.p2.screen.x +
+                    segment.p2.screen.w -
+                    goldWidth2 -
+                    whiteWidth2,
+                segment.p2.screen.y,
+                segment.p2.screen.x -
+                    segment.p2.screen.w +
+                    goldWidth2 +
+                    whiteWidth2,
                 segment.p2.screen.y
             )
             g.endFill()
@@ -472,25 +738,30 @@ export class GameEngine {
                 const l2 = segment.p2.screen.w / Math.max(32, 8 * this.lanes)
                 let lanex1 = segment.p1.screen.x - segment.p1.screen.w + lanew1
                 let lanex2 = segment.p2.screen.x - segment.p2.screen.w + lanew2
+
                 for (
                     let lane = 1;
                     lane < this.lanes;
                     lanex1 += lanew1, lanex2 += lanew2, lane++
                 ) {
-                    g.beginFill(segment.color.lane)
-                    g.moveTo(lanex1 - l1 / 2, segment.p1.screen.y)
-                    g.lineTo(lanex1 + l1 / 2, segment.p1.screen.y)
-                    g.lineTo(lanex2 + l2 / 2, segment.p2.screen.y)
-                    g.lineTo(lanex2 - l2 / 2, segment.p2.screen.y)
-                    g.closePath()
-                    g.endFill()
+                    // Affiche 1 sur 2 (pointillé : segments pairs uniquement)
+                    if (segment.index % 50 < 10) {
+                        // règle la taille/espacement ici
+                        g.fill(segment.color.lane)
+                        g.moveTo(lanex1 - l1 / 2, segment.p1.screen.y)
+                        g.lineTo(lanex1 + l1 / 2, segment.p1.screen.y)
+                        g.lineTo(lanex2 + l2 / 2, segment.p2.screen.y)
+                        g.lineTo(lanex2 - l2 / 2, segment.p2.screen.y)
+                        g.closePath()
+                        g.endFill()
+                    }
                 }
             }
 
             // Fog overlay
             if (segment.fog && segment.fog < 1) {
-                g.beginFill(COLORS.FOG, 1 - segment.fog)
-                g.drawRect(
+                g.fill(COLORS.FOG, 1 - segment.fog)
+                g.rect(
                     0,
                     segment.p2.screen.y,
                     this.width,
@@ -502,8 +773,39 @@ export class GameEngine {
             maxy = segment.p2.screen.y
         }
 
-        g.beginFill(COLORS.FOG, 0.95)
-        g.drawRect(0, horizonY - 2, this.width, 12)
+        // HUD / Jauge de vitesse
+        g.fill(0x111111, 0.75)
+        g.rect(12, 14, 192, 26)
+        g.endFill()
+
+        const minSpeed = 0
+        const maxSpeed = this.maxSpeed
+        const currentSpeedClamped = Math.max(
+            minSpeed,
+            Math.min(maxSpeed, this.speed)
+        )
+        const speedRatio =
+            maxSpeed > 0
+                ? (currentSpeedClamped - minSpeed) / (maxSpeed - minSpeed)
+                : 0
+        const gaugeWidth = speedRatio * 180 // 180 = largeur totale de la jauge
+
+        // Couleur de la jauge selon la vitesse
+        let color = 0x4fff66 // Vert pour vitesse basse
+        if (speedRatio > 0.4) color = 0xffaa44 // Orange pour vitesse moyenne
+        if (speedRatio > 0.7) color = 0xff4444 // Rouge pour vitesse élevée
+
+        // Effet de pulsation à haute vitesse
+        const pulseScale =
+            speedRatio > 0.8 ? 1 + Math.sin(Date.now() * 0.01) * 0.01 : 1
+
+        g.fill(color)
+        g.rect(18, 20, gaugeWidth * pulseScale, 13)
+        g.endFill()
+
+        // Reflet sur la jauge
+        g.fill(0xffffff, 0.4)
+        g.rect(18, 21, gaugeWidth * pulseScale, 3)
         g.endFill()
 
         if (this.playerSprite) {
@@ -512,16 +814,27 @@ export class GameEngine {
             this.playerSprite.rotation = 0
         }
 
+        const maxTilt = 0.05 // ≈ 25°
+        const tiltSpeed = 0.25 // ajuste pour la rapidité du retour
+
         if (this.playerSprite) {
             const carX = this.width / 2
             const carY = this.height - this.playerHeight / 2 - 32
 
             this.playerSprite.x = carX
             this.playerSprite.y = carY
-            this.playerSprite.rotation = 0
+
+            // TILT “arcade” : gauche = positif, droite = négatif
+            let targetTilt = 0
+            if (this.keyLeft) targetTilt = -maxTilt
+            else if (this.keyRight) targetTilt = +maxTilt
+
+            // Interpolation linéaire (lerp)
+            this.playerTilt += (targetTilt - this.playerTilt) * tiltSpeed
+            this.playerSprite.rotation = this.playerTilt
 
             // Ombre sous la moto
-            g.beginFill(0x000000, 0.25)
+            g.fill(0x000000, 0.25)
             g.drawEllipse(
                 carX,
                 carY + this.playerHeight * 0.43,
