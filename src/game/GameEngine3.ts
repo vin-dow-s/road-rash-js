@@ -744,9 +744,8 @@ export class GameEngine {
                     lane < this.lanes;
                     lanex1 += lanew1, lanex2 += lanew2, lane++
                 ) {
-                    // Affiche 1 sur 2 (pointillé : segments pairs uniquement)
+                    // Pointillés blancs
                     if (segment.index % 50 < 10) {
-                        // règle la taille/espacement ici
                         g.fill(segment.color.lane)
                         g.moveTo(lanex1 - l1 / 2, segment.p1.screen.y)
                         g.lineTo(lanex1 + l1 / 2, segment.p1.screen.y)
@@ -755,6 +754,40 @@ export class GameEngine {
                         g.closePath()
                         g.endFill()
                     }
+
+                    // Lignes foncées au milieu des voies avec effet de flou
+                    const lanePositions = [
+                        { x1: lanex1 - lanew1 / 2, x2: lanex2 - lanew2 / 2 }, // Première voie
+                        { x1: lanex1 + lanew1 / 2, x2: lanex2 + lanew2 / 2 }, // Deuxième voie
+                        {
+                            x1: lanex1 + lanew1 * 1.5,
+                            x2: lanex2 + lanew2 * 1.5,
+                        }, // Troisième voie
+                    ]
+
+                    // Pour chaque voie
+                    lanePositions.forEach((pos) => {
+                        // 5 couches de flou
+                        for (let i = 0; i < 5; i++) {
+                            const width1 = l1 * (4 - i * 0.5) // Diminue progressivement la largeur
+                            const width2 = l2 * (4 - i * 0.5)
+                            const alpha = 0.04 * Math.pow(0.8, i) // Opacité réduite pour un effet plus subtil
+
+                            g.fill(0x606060, alpha) // Gris plus clair
+                            this.polygon(
+                                g,
+                                pos.x1 - width1 / 2,
+                                segment.p1.screen.y,
+                                pos.x1 + width1 / 2,
+                                segment.p1.screen.y,
+                                pos.x2 + width2 / 2,
+                                segment.p2.screen.y,
+                                pos.x2 - width2 / 2,
+                                segment.p2.screen.y
+                            )
+                            g.endFill()
+                        }
+                    })
                 }
             }
 
@@ -838,8 +871,8 @@ export class GameEngine {
             g.drawEllipse(
                 carX,
                 carY + this.playerHeight * 0.43,
-                this.playerWidth * 0.32,
-                this.playerHeight * 0.09
+                this.playerWidth * 0.25,
+                this.playerHeight * 0.07
             )
             g.endFill()
         }
