@@ -53,7 +53,7 @@ const DEFAULTS = {
     segmentLength: 200,
     rumbleLength: 3,
     cameraHeight: 750,
-    drawDistance: 500,
+    drawDistance: 750,
     fogDensity: 2.5,
     fieldOfView: 100,
     fps: 60,
@@ -74,6 +74,9 @@ function increase(start: number, increment: number, max: number) {
     while (result >= max) result -= max
     while (result < 0) result += max
     return result
+}
+function interpolate(a: number, b: number, percent: number) {
+    return a + (b - a) * percent
 }
 function project(
     p: Point3D,
@@ -153,18 +156,27 @@ export class GameEngine {
     private rafId: number = 0
     private lastTs: number = 0
 
-    // Curves
-    private addSegment(curve: number = 0) {
+    // Hills support - fonction lastY pour maintenir la continuité
+    private lastY(): number {
+        return this.segments.length === 0
+            ? 0
+            : this.segments[this.segments.length - 1].p2.world.y
+    }
+
+    // Curves et Hills
+    private addSegment(curve: number = 0, y?: number) {
         const n = this.segments.length
+        const segmentY = y !== undefined ? y : this.lastY()
+
         this.segments.push({
             index: n,
             p1: {
-                world: { x: 0, y: 0, z: n * this.segmentLength },
+                world: { x: 0, y: this.lastY(), z: n * this.segmentLength },
                 camera: { x: 0, y: 0, z: 0 },
                 screen: { x: 0, y: 0, w: 0, scale: 0 },
             },
             p2: {
-                world: { x: 0, y: 0, z: (n + 1) * this.segmentLength },
+                world: { x: 0, y: segmentY, z: (n + 1) * this.segmentLength },
                 camera: { x: 0, y: 0, z: 0 },
                 screen: { x: 0, y: 0, w: 0, scale: 0 },
             },
@@ -178,12 +190,32 @@ export class GameEngine {
         })
     }
 
-    private addRoad(enter: number, hold: number, leave: number, curve: number) {
+    private addRoad(
+        enter: number,
+        hold: number,
+        leave: number,
+        curve: number,
+        y: number = 0
+    ) {
+        const startY = this.lastY()
+        const endY = startY + y * this.segmentLength
+        const total = enter + hold + leave
+
         for (let n = 0; n < enter; n++)
-            this.addSegment(this.easeIn(0, curve, n / enter))
-        for (let n = 0; n < hold; n++) this.addSegment(curve)
+            this.addSegment(
+                this.easeIn(0, curve, n / enter),
+                this.easeInOut(startY, endY, n / total)
+            )
+        for (let n = 0; n < hold; n++)
+            this.addSegment(
+                curve,
+                this.easeInOut(startY, endY, (enter + n) / total)
+            )
         for (let n = 0; n < leave; n++)
-            this.addSegment(this.easeInOut(curve, 0, n / leave))
+            this.addSegment(
+                this.easeInOut(curve, 0, n / leave),
+                this.easeInOut(startY, endY, (enter + hold + n) / total)
+            )
     }
 
     // Easing helpers
@@ -194,30 +226,87 @@ export class GameEngine {
         return a + (b - a) * (-Math.cos(percent * Math.PI) / 2 + 0.5)
     }
 
+    // Interpolation helper
+    private interpolate(a: number, b: number, percent: number) {
+        return a + (b - a) * percent
+    }
+
     // Préréglages façon Jake
     private ROAD = {
         LENGTH: { NONE: 0, SHORT: 80, MEDIUM: 180, LONG: 320 },
         CURVE: { NONE: 0, EASY: 0.6, MEDIUM: 1.2, HARD: 2 },
+        HILL: { NONE: 0, LOW: 20, MEDIUM: 40, HIGH: 60 },
     }
 
     private curveFactor = 0.3
 
     private addStraight(num = this.ROAD.LENGTH.MEDIUM) {
-        this.addRoad(num, num, num, 0)
+        this.addRoad(num, num, num, 0, 0)
+    }
+
+    private addHill(
+        num = this.ROAD.LENGTH.MEDIUM,
+        height = this.ROAD.HILL.MEDIUM
+    ) {
+        this.addRoad(num, num, num, 0, height)
     }
 
     private addCurve(
         num = this.ROAD.LENGTH.MEDIUM,
-        curve = this.ROAD.CURVE.MEDIUM
+        curve = this.ROAD.CURVE.MEDIUM,
+        height = this.ROAD.HILL.NONE
     ) {
-        this.addRoad(num, num, num, curve)
+        this.addRoad(num, num, num, curve, height)
+    }
+
+    private addLowRollingHills(
+        num = this.ROAD.LENGTH.SHORT,
+        height = this.ROAD.HILL.LOW
+    ) {
+        this.addRoad(num, num, num, 0, height / 2)
+        this.addRoad(num, num, num, 0, -height)
+        this.addRoad(num, num, num, 0, height)
+        this.addRoad(num, num, num, 0, 0)
+        this.addRoad(num, num, num, 0, height / 2)
+        this.addRoad(num, num, num, 0, 0)
     }
 
     private addSCurves() {
-        this.addCurve(this.ROAD.LENGTH.LONG, -this.ROAD.CURVE.EASY)
-        this.addStraight(this.ROAD.LENGTH.MEDIUM)
-        this.addCurve(this.ROAD.LENGTH.LONG, this.ROAD.CURVE.EASY)
-        this.addStraight(this.ROAD.LENGTH.MEDIUM)
+        this.addCurve(
+            this.ROAD.LENGTH.MEDIUM,
+            -this.ROAD.CURVE.EASY,
+            this.ROAD.HILL.NONE
+        )
+        this.addCurve(
+            this.ROAD.LENGTH.MEDIUM,
+            this.ROAD.CURVE.MEDIUM,
+            this.ROAD.HILL.MEDIUM
+        )
+        this.addCurve(
+            this.ROAD.LENGTH.MEDIUM,
+            this.ROAD.CURVE.EASY,
+            -this.ROAD.HILL.LOW
+        )
+        this.addCurve(
+            this.ROAD.LENGTH.MEDIUM,
+            -this.ROAD.CURVE.EASY,
+            this.ROAD.HILL.MEDIUM
+        )
+        this.addCurve(
+            this.ROAD.LENGTH.MEDIUM,
+            -this.ROAD.CURVE.MEDIUM,
+            -this.ROAD.HILL.MEDIUM
+        )
+    }
+
+    private addDownhillToEnd(num = 200) {
+        this.addRoad(
+            num,
+            num,
+            num,
+            -this.ROAD.CURVE.EASY,
+            -this.lastY() / this.segmentLength
+        )
     }
 
     constructor() {}
@@ -347,28 +436,36 @@ export class GameEngine {
     private reset() {
         this.segments = []
 
-        // Démarre avec une courte ligne droite
+        // Circuit avec collines inspiré de Jake Gordon
         this.addStraight(this.ROAD.LENGTH.SHORT / 2)
-
-        // 1 long virage gauche
-        this.addCurve(this.ROAD.LENGTH.LONG * 1.2, -this.ROAD.CURVE.EASY)
-
-        // Grande ligne droite pour relâcher la tension
-        this.addStraight(this.ROAD.LENGTH.LONG * 1.5)
-
-        // 1 long virage droite
-        this.addCurve(this.ROAD.LENGTH.LONG * 1.2, this.ROAD.CURVE.MEDIUM)
-
-        // Encore une longue droite
-        this.addStraight(this.ROAD.LENGTH.LONG * 2)
-
-        // Quelques enchaînements (mais moins, et plus longs)
-        this.addCurve(this.ROAD.LENGTH.LONG, -this.ROAD.CURVE.EASY)
-        this.addStraight(this.ROAD.LENGTH.MEDIUM)
-        this.addCurve(this.ROAD.LENGTH.LONG, this.ROAD.CURVE.EASY)
-
-        // Finir par une longue ligne droite
-        this.addStraight(this.ROAD.LENGTH.LONG * 2)
+        this.addHill(this.ROAD.LENGTH.SHORT, this.ROAD.HILL.LOW)
+        this.addLowRollingHills()
+        this.addCurve(
+            this.ROAD.LENGTH.MEDIUM,
+            this.ROAD.CURVE.MEDIUM,
+            this.ROAD.HILL.LOW
+        )
+        this.addLowRollingHills()
+        this.addCurve(
+            this.ROAD.LENGTH.LONG,
+            this.ROAD.CURVE.MEDIUM,
+            this.ROAD.HILL.MEDIUM
+        )
+        this.addStraight()
+        this.addCurve(
+            this.ROAD.LENGTH.LONG,
+            -this.ROAD.CURVE.MEDIUM,
+            this.ROAD.HILL.MEDIUM
+        )
+        this.addHill(this.ROAD.LENGTH.LONG, this.ROAD.HILL.HIGH)
+        this.addCurve(
+            this.ROAD.LENGTH.LONG,
+            this.ROAD.CURVE.MEDIUM,
+            -this.ROAD.HILL.LOW
+        )
+        this.addHill(this.ROAD.LENGTH.LONG, -this.ROAD.HILL.MEDIUM)
+        this.addStraight()
+        this.addDownhillToEnd()
 
         // START/FINISH colors etc (comme avant)
         this.segments[this.findSegment(this.playerZ).index + 2].color =
@@ -500,8 +597,24 @@ export class GameEngine {
         let baseSegment = this.findSegment(this.position)
         let basePercent =
             (this.position % this.segmentLength) / this.segmentLength
-        let maxy = this.height
+        let playerSegment = this.findSegment(this.position + this.playerZ)
+        let playerPercent =
+            ((this.position + this.playerZ) % this.segmentLength) /
+            this.segmentLength
 
+        // Calcul de la position Y du joueur pour les collines
+        let playerY = this.interpolate(
+            playerSegment.p1.world.y,
+            playerSegment.p2.world.y,
+            playerPercent
+        )
+
+        // Mise à jour du background avec parallax vertical
+        if (this.backgroundSprite) {
+            this.backgroundSprite.y = -playerY * 0.002 // facteur ajustable pour l'effet vertical
+        }
+
+        let maxy = this.height
         let x = 0
         let dx = -((baseSegment.curve || 0) * basePercent) * this.curveFactor
 
@@ -514,7 +627,7 @@ export class GameEngine {
             project(
                 segment.p1,
                 this.playerX * this.roadWidth - x,
-                this.cameraHeight,
+                playerY + this.cameraHeight,
                 this.position - (segment.looped ? this.trackLength : 0),
                 this.cameraDepth,
                 this.width,
@@ -524,7 +637,7 @@ export class GameEngine {
             project(
                 segment.p2,
                 this.playerX * this.roadWidth - x - dx,
-                this.cameraHeight,
+                playerY + this.cameraHeight,
                 this.position - (segment.looped ? this.trackLength : 0),
                 this.cameraDepth,
                 this.width,
