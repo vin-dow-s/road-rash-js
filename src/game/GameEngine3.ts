@@ -61,7 +61,7 @@ const DEFAULTS = {
     segmentLength: 200,
     rumbleLength: 3,
     cameraHeight: 1000,
-    drawDistance: 300,
+    drawDistance: 750,
     fieldOfView: 100,
     fps: 60,
 }
@@ -994,20 +994,27 @@ export class GameEngine {
             const cameraZ = this.position
 
             // Récupère le X cumulé de la route entre la caméra et la voiture (pour synchroniser la position horizontale avec la route courbée)
-            let carBaseSegment = this.findSegment(this.position)
-            let carBaseIndex = carBaseSegment.index
-            let carTargetIndex = this.findSegment(car.z).index
-            let carX = 0
-            let carDx =
-                -((carBaseSegment.curve || 0) * basePercent) * this.curveFactor
+            // Trouver le segment caméra et celui de la voiture
+            let cameraSegment = this.findSegment(this.position)
 
-            for (let i = 0; i < carTargetIndex - carBaseIndex; i++) {
-                const seg =
-                    this.segments[(carBaseIndex + i) % this.segments.length]
-                carX += carDx
-                carDx += (seg.curve || 0) * this.curveFactor
+            let x = 0
+            let dx =
+                -((cameraSegment.curve || 0) * basePercent) * this.curveFactor
+            let steps =
+                (carSegment.index -
+                    cameraSegment.index +
+                    this.segments.length) %
+                this.segments.length
+
+            for (let i = 0; i < steps; i++) {
+                const index = (cameraSegment.index + i) % this.segments.length
+                const seg = this.segments[index]
+                x += dx
+                dx += (seg.curve || 0) * this.curveFactor
             }
-            const carRoadX = car.offset * this.roadWidth - carX
+
+            // “x” est le décalage de la route à l'endroit de la voiture (dans le repère caméra)
+            const carRoadX = car.offset * this.roadWidth + x
 
             const carP: Point3D = {
                 world: {
@@ -1032,7 +1039,6 @@ export class GameEngine {
             )
 
             const scale = carP.screen.scale
-            const x = carP.screen.x
             const y = carP.screen.y
 
             const carWidth = carP.screen.w * 0.3 // facteur réglable
@@ -1040,14 +1046,23 @@ export class GameEngine {
                 carWidth *
                 (this.carDimensions.height / this.carDimensions.width)
 
-            car.sprite.width = Math.max(1, carWidth)
-            car.sprite.height = Math.max(1, carHeight)
-            car.sprite.x = x
-            car.sprite.y = y
-            car.sprite.visible = scale > 0 && y > 0 && y < this.height
+            const clip =
+                typeof carSegment.clip === "number"
+                    ? carSegment.clip
+                    : this.height
 
-            if (!car.sprite.parent && this.root) {
-                this.root.addChild(car.sprite)
+            // CLIPPING PAR CRETE DE LA ROUTE
+            if (y < clip) {
+                car.sprite.width = Math.max(1, carWidth)
+                car.sprite.height = Math.max(1, carHeight)
+                car.sprite.x = carP.screen.x
+                car.sprite.y = carP.screen.y
+                car.sprite.visible = scale > 0 && y > 0 && y < this.height
+                if (!car.sprite.parent && this.root) {
+                    this.root.addChild(car.sprite)
+                }
+            } else {
+                car.sprite.visible = false
             }
         }
 
