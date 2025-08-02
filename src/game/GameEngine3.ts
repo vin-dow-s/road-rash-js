@@ -25,9 +25,18 @@ type Segment = {
     p1: Point3D
     p2: Point3D
     color: SegmentColor
-    fog?: number
     looped?: boolean
     curve?: number
+    cars?: Car[]
+    clip?: number
+}
+
+type Car = {
+    z: number // position le long de la route (en z)
+    offset: number // de -1 à 1 sur la largeur de la route
+    speed: number // vitesse de la voiture
+    sprite: Sprite // sprite du véhicule
+    percent?: number // % d'avancement sur le segment (pour l'interpolation de rendu)
 }
 
 // ======= Couleurs / Settings =======
@@ -42,19 +51,17 @@ const COLORS = {
     START: { road: 0xffffff, grass: 0xffffff, rumble: 0xffffff },
     FINISH: { road: 0x000000, grass: 0x000000, rumble: 0x000000 },
     SKY: 0x87ceeb,
-    FOG: 0x8ad4c0,
 }
 
 const DEFAULTS = {
     width: window.innerWidth,
     height: window.innerHeight,
     lanes: 3,
-    roadWidth: 1200,
+    roadWidth: 2000,
     segmentLength: 200,
     rumbleLength: 3,
-    cameraHeight: 750,
-    drawDistance: 750,
-    fogDensity: 2.5,
+    cameraHeight: 1000,
+    drawDistance: 300,
     fieldOfView: 100,
     fps: 60,
 }
@@ -63,21 +70,18 @@ const DEFAULTS = {
 function clamp(val: number, min: number, max: number) {
     return Math.max(min, Math.min(val, max))
 }
+
 function accelerate(v: number, accel: number, dt: number) {
     return v + accel * dt
 }
-function exponentialFog(distance: number, density: number) {
-    return 1 / Math.pow(Math.E, distance * distance * density)
-}
+
 function increase(start: number, increment: number, max: number) {
     let result = start + increment
     while (result >= max) result -= max
     while (result < 0) result += max
     return result
 }
-function interpolate(a: number, b: number, percent: number) {
-    return a + (b - a) * percent
-}
+
 function project(
     p: Point3D,
     cameraX: number,
@@ -106,6 +110,7 @@ export class GameEngine {
     private app: PIXI.Application | null = null
     private graphics: PIXI.Graphics | null = null
     private container: HTMLElement | null = null
+    private root: PIXI.Container | null = null
     // State
     private width: number = DEFAULTS.width
     private height: number = DEFAULTS.height
@@ -115,7 +120,6 @@ export class GameEngine {
     private rumbleLength: number = DEFAULTS.rumbleLength
     private cameraHeight: number = DEFAULTS.cameraHeight
     private drawDistance: number = DEFAULTS.drawDistance
-    private fogDensity: number = DEFAULTS.fogDensity
     private fieldOfView: number = DEFAULTS.fieldOfView
     private fps: number = DEFAULTS.fps
 
@@ -130,6 +134,14 @@ export class GameEngine {
     private decel: number = 0
     private offRoadDecel: number = 0
     private offRoadLimit: number = 0
+
+    // Propriétés pour les voitures
+    private cars: Car[] = []
+    private readonly totalCars: number = 10
+    private readonly carDimensions = {
+        width: 150,
+        height: 150,
+    }
 
     // Joueur/Jeu
     private position: number = 0
@@ -220,14 +232,14 @@ export class GameEngine {
 
     // Easing helpers
     private easeIn(a: number, b: number, percent: number) {
-        return a + (b - a) * Math.pow(percent, 2)
-    }
-    private easeInOut(a: number, b: number, percent: number) {
-        return a + (b - a) * (-Math.cos(percent * Math.PI) / 2 + 0.5)
+        return this.interpolate(a, b, Math.pow(percent, 2))
     }
 
-    // Interpolation helper
-    private interpolate(a: number, b: number, percent: number) {
+    private easeInOut(a: number, b: number, percent: number) {
+        return this.interpolate(a, b, -Math.cos(percent * Math.PI) / 2 + 0.5)
+    }
+
+    private interpolate(a: number, b: number, percent: number): number {
         return a + (b - a) * percent
     }
 
@@ -347,8 +359,8 @@ export class GameEngine {
         }
 
         // Sprites and graphics
-        const root = new Container()
-        this.app.stage.addChild(root)
+        this.root = new Container()
+        this.app.stage.addChild(this.root)
 
         // Background en premier pour qu'il soit derrière tout le reste
         if (this.backgroundTexture) {
@@ -357,12 +369,12 @@ export class GameEngine {
             this.backgroundSprite.height = this.height * 0.8
             this.backgroundSprite.x = 0
             this.backgroundSprite.y = 0
-            root.addChild(this.backgroundSprite)
+            this.root.addChild(this.backgroundSprite)
         }
 
         // Route, décor, HUD...
         this.graphics = new Graphics()
-        root.addChild(this.graphics)
+        this.root.addChild(this.graphics)
 
         // Player
         if (this.playerTexture) {
@@ -370,7 +382,7 @@ export class GameEngine {
             this.playerSprite.width = this.playerWidth
             this.playerSprite.height = this.playerHeight
             this.playerSprite.anchor.set(0.5)
-            root.addChild(this.playerSprite)
+            this.root.addChild(this.playerSprite)
         } else {
             // Créer un sprite de fallback si la texture n'a pas pu être chargée
             const fallbackGraphics = new Graphics()
@@ -386,7 +398,7 @@ export class GameEngine {
                 this.app.renderer.generateTexture(fallbackGraphics)
             this.playerSprite = new Sprite(fallbackTexture)
             this.playerSprite.anchor.set(0.5)
-            root.addChild(this.playerSprite)
+            this.root.addChild(this.playerSprite)
         }
 
         // Player sprite (centré)
@@ -396,7 +408,7 @@ export class GameEngine {
             this.playerSprite.rotation = 0
         }
 
-        this.reset()
+        await this.reset()
 
         window.addEventListener("keydown", this.handleKeyDown)
         window.addEventListener("keyup", this.handleKeyUp)
@@ -409,6 +421,15 @@ export class GameEngine {
         window.removeEventListener("keydown", this.handleKeyDown)
         window.removeEventListener("keyup", this.handleKeyUp)
         window.removeEventListener("resize", this.handleResize)
+
+        // Nettoyage des voitures
+        for (const car of this.cars) {
+            if (car.sprite.parent) {
+                car.sprite.parent.removeChild(car.sprite)
+            }
+            car.sprite.destroy()
+        }
+        this.cars = []
 
         if (this.app && this.app.renderer) {
             try {
@@ -430,13 +451,15 @@ export class GameEngine {
     }
 
     // ========== Road/State Génération ==========
-    private reset() {
+    private async reset() {
         this.segments = []
+        this.cars = []
 
         // Circuit avec collines inspiré de Jake Gordon
         this.addStraight(this.ROAD.LENGTH.SHORT / 2)
         this.addHill(this.ROAD.LENGTH.SHORT, this.ROAD.HILL.LOW)
         this.addLowRollingHills()
+
         this.addCurve(
             this.ROAD.LENGTH.MEDIUM,
             this.ROAD.CURVE.MEDIUM,
@@ -486,6 +509,8 @@ export class GameEngine {
         this.position = 0
         this.speed = 200
         this.playerX = 0
+
+        await this.resetCars()
     }
 
     private findSegment(z: number): Segment {
@@ -504,7 +529,31 @@ export class GameEngine {
     }
 
     // ========== LOGIQUE ==========
+    private updateCars(dt: number) {
+        for (const car of this.cars) {
+            const oldSegment = this.findSegment(car.z)
+
+            // Mise à jour de la position Z
+            car.z = increase(car.z, dt * car.speed, this.trackLength)
+            car.percent = (car.z % this.segmentLength) / this.segmentLength
+
+            // Déplacement vers le nouveau segment si nécessaire
+            const newSegment = this.findSegment(car.z)
+            if (oldSegment !== newSegment) {
+                const index = oldSegment.cars?.indexOf(car)
+                if (index !== undefined && index > -1) {
+                    oldSegment.cars?.splice(index, 1)
+                }
+                newSegment.cars = newSegment.cars || []
+                newSegment.cars.push(car)
+            }
+        }
+    }
+
     private update(dt: number) {
+        // Mise à jour des voitures
+        this.updateCars(dt)
+
         this.position = increase(
             this.position,
             dt * this.speed,
@@ -602,6 +651,7 @@ export class GameEngine {
         let tempDx =
             -((baseSegment.curve || 0) * basePercent) * this.curveFactor
 
+        /** RENDU DE LA ROUTE */
         for (let n = 0; n < this.drawDistance; n++) {
             let segment =
                 this.segments[(baseSegment.index + n) % this.segments.length]
@@ -637,11 +687,11 @@ export class GameEngine {
         let x = 0
         let dx = -((baseSegment.curve || 0) * basePercent) * this.curveFactor
 
+        /** RENDU DES SEGMENTS */
         for (let n = 0; n < this.drawDistance; n++) {
             let segment =
                 this.segments[(baseSegment.index + n) % this.segments.length]
             segment.looped = segment.index < baseSegment.index
-            segment.fog = exponentialFog(n / this.drawDistance, this.fogDensity)
 
             project(
                 segment.p1,
@@ -923,19 +973,82 @@ export class GameEngine {
                 }
             }
 
-            // Fog overlay
-            if (segment.fog && segment.fog < 1) {
-                g.fill(COLORS.FOG, 1 - segment.fog)
-                g.rect(
-                    0,
-                    segment.p2.screen.y,
-                    this.width,
-                    maxy - segment.p2.screen.y
-                )
-                g.endFill()
+            segment.clip = maxy
+            maxy = segment.p2.screen.y
+        }
+
+        /** OPPONENTS */
+        for (const car of this.cars) {
+            // Trouver le segment sur lequel est la voiture
+            const carSegment = this.findSegment(car.z)
+            const percent = (car.z % this.segmentLength) / this.segmentLength
+
+            const carY = this.interpolate(
+                carSegment.p1.world.y,
+                carSegment.p2.world.y,
+                percent
+            )
+
+            // Calcul du z local pour le project
+            const cameraY = playerY + this.cameraHeight
+            const cameraZ = this.position
+
+            // Récupère le X cumulé de la route entre la caméra et la voiture (pour synchroniser la position horizontale avec la route courbée)
+            let carBaseSegment = this.findSegment(this.position)
+            let carBaseIndex = carBaseSegment.index
+            let carTargetIndex = this.findSegment(car.z).index
+            let carX = 0
+            let carDx =
+                -((carBaseSegment.curve || 0) * basePercent) * this.curveFactor
+
+            for (let i = 0; i < carTargetIndex - carBaseIndex; i++) {
+                const seg =
+                    this.segments[(carBaseIndex + i) % this.segments.length]
+                carX += carDx
+                carDx += (seg.curve || 0) * this.curveFactor
+            }
+            const carRoadX = car.offset * this.roadWidth - carX
+
+            const carP: Point3D = {
+                world: {
+                    x: carRoadX,
+                    y: carY,
+                    z: car.z,
+                },
+                camera: { x: 0, y: 0, z: 0 },
+                screen: { x: 0, y: 0, w: 0, scale: 0 },
             }
 
-            maxy = segment.p2.screen.y
+            // Projette la voiture
+            project(
+                carP,
+                this.playerX * this.roadWidth,
+                cameraY,
+                cameraZ,
+                this.cameraDepth,
+                this.width,
+                this.height,
+                this.roadWidth
+            )
+
+            const scale = carP.screen.scale
+            const x = carP.screen.x
+            const y = carP.screen.y
+
+            const carWidth = carP.screen.w * 0.3 // facteur réglable
+            const carHeight =
+                carWidth *
+                (this.carDimensions.height / this.carDimensions.width)
+
+            car.sprite.width = Math.max(1, carWidth)
+            car.sprite.height = Math.max(1, carHeight)
+            car.sprite.x = x
+            car.sprite.y = y
+            car.sprite.visible = scale > 0 && y > 0 && y < this.height
+
+            if (!car.sprite.parent && this.root) {
+                this.root.addChild(car.sprite)
+            }
         }
 
         // HUD / Jauge de vitesse
@@ -1011,6 +1124,55 @@ export class GameEngine {
     }
 
     // Polygon helper
+    private async resetCars() {
+        // Nettoyage des anciennes voitures
+        for (const car of this.cars) {
+            if (car.sprite.parent) {
+                car.sprite.parent.removeChild(car.sprite)
+            }
+        }
+        this.cars = []
+
+        try {
+            const carTexture = await Assets.load("src/assets/Default.png")
+            const base = this.findSegment(this.position).index
+
+            console.log(`Création de ${this.totalCars} voitures...`)
+            console.log(
+                `Base segment: ${base}, Total segments: ${this.segments.length}`
+            )
+
+            for (let i = 0; i < this.totalCars; i++) {
+                // Place chaque voiture devant le joueur
+                const carZ =
+                    this.position + this.playerZ + (i + 4) * this.segmentLength
+
+                const segment = this.findSegment(carZ)
+                const z = segment.p1.world.z
+                const offset = (Math.random() - 0.5) * 1.8
+                const speed = this.maxSpeed * (0.3 + Math.random() * 0.4)
+                const sprite = new Sprite(carTexture)
+                sprite.anchor.set(0.5)
+                const car: Car = { z, offset, speed, sprite }
+                segment.cars = segment.cars || []
+                segment.cars.push(car)
+                this.cars.push(car)
+
+                console.log(
+                    `Voiture ${i}: segment (find) = ${this.segments.indexOf(
+                        segment
+                    )}, z = ${z}, offset = ${offset.toFixed(
+                        2
+                    )}, speed = ${speed.toFixed(0)}`
+                )
+            }
+
+            console.log(`Total voitures créées: ${this.cars.length}`)
+        } catch (error) {
+            console.error("Erreur lors du chargement des voitures:", error)
+        }
+    }
+
     private polygon(
         g: PIXI.Graphics,
         x1: number,
@@ -1027,6 +1189,26 @@ export class GameEngine {
         g.lineTo(x3, y3)
         g.lineTo(x4, y4)
         g.lineTo(x1, y1)
+    }
+
+    private calcCurveOffset(
+        carZ: number,
+        cameraZ: number,
+        segments: Segment[],
+        segmentLength: number,
+        curveFactor: number
+    ) {
+        // Reprend la logique Jake Gordon : cumule la courbe entre la caméra et la voiture
+        let offset = 0
+        let dz = carZ - cameraZ
+        let segmentIndex = Math.floor(cameraZ / segmentLength)
+        while (dz > 0) {
+            const segment = segments[segmentIndex % segments.length]
+            offset += segment.curve || 0
+            dz -= segmentLength
+            segmentIndex++
+        }
+        return offset * curveFactor * this.roadWidth
     }
 
     // ========== CLAVIER ==========
