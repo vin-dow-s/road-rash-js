@@ -666,11 +666,16 @@ export class GameEngine {
             bikeP.screen.y < clipLimit &&
             dz > 0
 
+        const minSize = 8
+
+        const isLargeEnough =
+            bikeWidth * 1.2 >= minSize && bikeHeight * 1.2 >= minSize
+
         bike.sprite.width = bikeWidth * 1.2
         bike.sprite.height = bikeHeight * 1.2
         bike.sprite.x = bikeP.screen.x
         bike.sprite.y = bikeP.screen.y
-        bike.sprite.visible = shouldBeVisible
+        bike.sprite.visible = shouldBeVisible && isLargeEnough
     }
 
     // ========== LOGIQUE ==========
