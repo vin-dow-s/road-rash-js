@@ -28,11 +28,11 @@ type Segment = {
     color: SegmentColor
     looped?: boolean
     curve?: number
-    cars?: Car[]
+    bikes?: Bike[]
     clip?: number
 }
 
-type Car = {
+type Bike = {
     z: number // position le long de la route (en z)
     offset: number // de -1 à 1 sur la largeur de la route
     speed: number // vitesse de la voiture
@@ -137,9 +137,9 @@ export class GameEngine {
     private offRoadLimit: number = 0
 
     // Propriétés pour les voitures
-    private cars: Car[] = []
-    private readonly totalCars: number = 10
-    private readonly carDimensions = {
+    private bikes: Bike[] = []
+    private readonly totalBikes: number = 10
+    private readonly bikeDimensions = {
         width: 150,
         height: 150,
     }
@@ -399,9 +399,9 @@ export class GameEngine {
                 this.segments[(baseSegment.index + n) % this.segments.length]
 
             // Rendu des voitures de ce segment - VERSION SIMPLIFIÉE
-            if (segment.cars) {
-                for (const car of segment.cars) {
-                    this.renderCarWithClipping(car, segment, playerY)
+            if (segment.bikes) {
+                for (const bike of segment.bikes) {
+                    this.renderBikeWithClipping(bike, segment, playerY)
                 }
             }
         }
@@ -427,11 +427,11 @@ export class GameEngine {
         const tiltSpeed = 0.25 // ajuste pour la rapidité du retour
 
         if (this.playerSprite) {
-            const carX = this.width / 2
-            const carY = this.height - this.playerHeight / 2 - 32
+            const bikeX = this.width / 2
+            const bikeY = this.height - this.playerHeight / 2 - 32
 
-            this.playerSprite.x = carX
-            this.playerSprite.y = carY
+            this.playerSprite.x = bikeX
+            this.playerSprite.y = bikeY
 
             // TILT “arcade” : gauche = positif, droite = négatif
             let targetTilt = 0
@@ -445,8 +445,8 @@ export class GameEngine {
             // Ombre sous la moto
             g.fill(0x000000, 0.25)
             g.drawEllipse(
-                carX,
-                carY + this.playerHeight * 0.43,
+                bikeX,
+                bikeY + this.playerHeight * 0.43,
                 this.playerWidth * 0.25,
                 this.playerHeight * 0.07
             )
@@ -456,7 +456,7 @@ export class GameEngine {
 
     private update(dt: number) {
         // Mise à jour des voitures
-        this.updateCars(dt)
+        this.updateBikes(dt)
 
         this.position = increase(
             this.position,
@@ -515,13 +515,13 @@ export class GameEngine {
         window.removeEventListener("resize", this.handleResize)
 
         // Nettoyage des voitures
-        for (const car of this.cars) {
-            if (car.sprite.parent) {
-                car.sprite.parent.removeChild(car.sprite)
+        for (const bike of this.bikes) {
+            if (bike.sprite.parent) {
+                bike.sprite.parent.removeChild(bike.sprite)
             }
-            car.sprite.destroy()
+            bike.sprite.destroy()
         }
-        this.cars = []
+        this.bikes = []
 
         if (this.app && this.app.renderer) {
             try {
@@ -537,7 +537,7 @@ export class GameEngine {
     // ========== Road/State Génération ==========
     private async reset() {
         this.segments = []
-        this.cars = []
+        this.bikes = []
 
         // Circuit avec collines inspiré de Jake Gordon
         this.addStraight(this.ROAD.LENGTH.SHORT / 2)
@@ -594,7 +594,7 @@ export class GameEngine {
         this.speed = 200
         this.playerX = 0
 
-        await this.resetCars()
+        await this.resetBikes()
     }
 
     private findSegment(z: number): Segment {
@@ -603,15 +603,15 @@ export class GameEngine {
         ]
     }
 
-    private renderCarWithClipping(
-        car: Car,
-        carSegment: Segment,
+    private renderBikeWithClipping(
+        bike: Bike,
+        bikeSegment: Segment,
         playerY: number
     ) {
-        const percent = (car.z % this.segmentLength) / this.segmentLength
-        const carY = this.interpolate(
-            carSegment.p1.world.y,
-            carSegment.p2.world.y,
+        const percent = (bike.z % this.segmentLength) / this.segmentLength
+        const bikeY = this.interpolate(
+            bikeSegment.p1.world.y,
+            bikeSegment.p2.world.y,
             percent
         )
 
@@ -623,7 +623,7 @@ export class GameEngine {
         let x = 0
         let dx = -((baseSegment.curve || 0) * basePercent) * this.curveFactor
         let steps =
-            (carSegment.index - baseSegment.index + this.segments.length) %
+            (bikeSegment.index - baseSegment.index + this.segments.length) %
             this.segments.length
 
         for (let i = 0; i < steps; i++) {
@@ -633,17 +633,17 @@ export class GameEngine {
             dx += (seg.curve || 0) * this.curveFactor
         }
 
-        const carRoadX = car.offset * this.roadWidth + x
+        const bikeRoadX = bike.offset * this.roadWidth + x
 
-        const carP: Point3D = {
-            world: { x: carRoadX, y: carY, z: car.z },
+        const bikeP: Point3D = {
+            world: { x: bikeRoadX, y: bikeY, z: bike.z },
             camera: { x: 0, y: 0, z: 0 },
             screen: { x: 0, y: 0, w: 0, scale: 0 },
         }
 
         // Projection de la voiture
         project(
-            carP,
+            bikeP,
             this.playerX * this.roadWidth,
             playerY + this.cameraHeight,
             this.position,
@@ -653,80 +653,80 @@ export class GameEngine {
             this.roadWidth
         )
 
-        const carWidth = carP.screen.w * 0.3
-        const carHeight =
-            carWidth * (this.carDimensions.height / this.carDimensions.width)
+        const bikeWidth = bikeP.screen.w * 0.3
+        const bikeHeight =
+            bikeWidth * (this.bikeDimensions.height / this.bikeDimensions.width)
 
-        const clipTolerance = carHeight * 0.5 // Tolérance = moitié de la hauteur de la voiture
-        const clipLimit = (carSegment.clip || this.height) + clipTolerance
+        const clipTolerance = bikeHeight * 0.5
+        const clipLimit = (bikeSegment.clip || this.height) + clipTolerance
 
-        const dz = car.z - (this.position + this.playerZ)
+        const dz = bike.z - (this.position + this.playerZ)
         const shouldBeVisible =
-            carP.camera.z > this.cameraDepth &&
-            carP.screen.y < clipLimit &&
+            bikeP.camera.z > this.cameraDepth &&
+            bikeP.screen.y < clipLimit &&
             dz > 0
 
-        car.sprite.width = Math.max(10, carWidth)
-        car.sprite.height = Math.max(10, carHeight)
-        car.sprite.x = carP.screen.x
-        car.sprite.y = carP.screen.y
-        car.sprite.visible = shouldBeVisible
+        bike.sprite.width = bikeWidth * 1.2
+        bike.sprite.height = bikeHeight * 1.2
+        bike.sprite.x = bikeP.screen.x
+        bike.sprite.y = bikeP.screen.y
+        bike.sprite.visible = shouldBeVisible
     }
 
     // ========== LOGIQUE ==========
-    private updateCars(dt: number) {
-        for (const car of this.cars) {
-            const oldSegment = this.findSegment(car.z)
+    private updateBikes(dt: number) {
+        for (const bike of this.bikes) {
+            const oldSegment = this.findSegment(bike.z)
 
             // Mise à jour de la position Z
-            car.z = increase(car.z, dt * car.speed, this.trackLength)
-            car.percent = (car.z % this.segmentLength) / this.segmentLength
+            bike.z = increase(bike.z, dt * bike.speed, this.trackLength)
+            bike.percent = (bike.z % this.segmentLength) / this.segmentLength
 
             // Déplacement vers le nouveau segment si nécessaire
-            const newSegment = this.findSegment(car.z)
+            const newSegment = this.findSegment(bike.z)
             if (oldSegment !== newSegment) {
-                const index = oldSegment.cars?.indexOf(car)
+                const index = oldSegment.bikes?.indexOf(bike)
                 if (index !== undefined && index > -1) {
-                    oldSegment.cars?.splice(index, 1)
+                    oldSegment.bikes?.splice(index, 1)
                 }
-                newSegment.cars = newSegment.cars || []
-                newSegment.cars.push(car)
+                newSegment.bikes = newSegment.bikes || []
+                newSegment.bikes.push(bike)
             }
         }
     }
 
     // Polygon helper
-    private async resetCars() {
+    private async resetBikes() {
         // Nettoyage des anciennes voitures
-        for (const car of this.cars) {
-            if (car.sprite.parent) {
-                car.sprite.parent.removeChild(car.sprite)
+        for (const bike of this.bikes) {
+            if (bike.sprite.parent) {
+                bike.sprite.parent.removeChild(bike.sprite)
             }
         }
-        this.cars = []
+        this.bikes = []
 
         try {
-            const carTexture = await Assets.load("src/assets/Default.png")
+            const bikeTexture = await Assets.load("src/assets/Default.png")
             const base = this.findSegment(this.position).index
 
-            for (let i = 0; i < this.totalCars; i++) {
+            for (let i = 0; i < this.totalBikes; i++) {
                 // Place chaque voiture devant le joueur
-                const carZ =
+                const bikeZ =
                     this.position + this.playerZ + (i + 4) * this.segmentLength
 
-                const segment = this.findSegment(carZ)
+                const segment = this.findSegment(bikeZ)
                 const z = segment.p1.world.z
                 const offset = (Math.random() - 0.5) * 1.8
                 const speed = this.maxSpeed * (0.3 + Math.random() * 0.4)
-                const sprite = new Sprite(carTexture)
+                const sprite = new Sprite(bikeTexture)
                 sprite.anchor.set(0.5)
 
                 if (this.root) this.root.addChild(sprite)
 
-                const car: Car = { z, offset, speed, sprite }
-                segment.cars = segment.cars || []
-                segment.cars.push(car)
-                this.cars.push(car)
+                const bike: Bike = { z, offset, speed, sprite }
+                segment.bikes = segment.bikes || []
+                segment.bikes.push(bike)
+                this.bikes.push(bike)
             }
         } catch (error) {
             console.error("Erreur lors du chargement des voitures:", error)
