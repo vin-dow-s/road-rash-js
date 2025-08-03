@@ -657,26 +657,20 @@ export class GameEngine {
         const carHeight =
             carWidth * (this.carDimensions.height / this.carDimensions.width)
 
-        //Tolérance au clipping - FONCTIONNE BIEN MAIS SPRITES S'ACCROCHENT AU BAS DE L'ECRAN EN DEPASSANT LES OPPONENTS
         const clipTolerance = carHeight * 0.5 // Tolérance = moitié de la hauteur de la voiture
         const clipLimit = (carSegment.clip || this.height) + clipTolerance
 
+        const dz = car.z - (this.position + this.playerZ)
         const shouldBeVisible =
-            carP.camera.z > this.cameraDepth && carP.screen.y < clipLimit
+            carP.camera.z > this.cameraDepth &&
+            carP.screen.y < clipLimit &&
+            dz > 0
 
-        if (shouldBeVisible) {
-            car.sprite.width = Math.max(10, carWidth)
-            car.sprite.height = Math.max(10, carHeight)
-            car.sprite.x = carP.screen.x
-            car.sprite.y = carP.screen.y
-            car.sprite.visible = true
-
-            if (!car.sprite.parent && this.root) {
-                this.root.addChild(car.sprite)
-            }
-        } else {
-            car.sprite.visible = false
-        }
+        car.sprite.width = Math.max(10, carWidth)
+        car.sprite.height = Math.max(10, carHeight)
+        car.sprite.x = carP.screen.x
+        car.sprite.y = carP.screen.y
+        car.sprite.visible = shouldBeVisible
     }
 
     // ========== LOGIQUE ==========
@@ -726,6 +720,9 @@ export class GameEngine {
                 const speed = this.maxSpeed * (0.3 + Math.random() * 0.4)
                 const sprite = new Sprite(carTexture)
                 sprite.anchor.set(0.5)
+
+                if (this.root) this.root.addChild(sprite)
+
                 const car: Car = { z, offset, speed, sprite }
                 segment.cars = segment.cars || []
                 segment.cars.push(car)
@@ -736,25 +733,11 @@ export class GameEngine {
         }
     }
 
-    private cleanupInvisibleSprites() {
-        for (const car of this.cars) {
-            if (!car.sprite.visible && car.sprite.parent) {
-                // Retirer les sprites invisibles depuis longtemps du DOM
-                // pour optimiser les performances
-                car.sprite.parent.removeChild(car.sprite)
-            }
-        }
-    }
-
     // ========== GAME LOOP ==========
     private gameLoop = (ts: number) => {
         const dt = Math.min(1, (ts - this.lastTs) / 1000) || 0.016
         this.update(dt)
         this.render()
-
-        if (Math.floor(ts / 2000) !== Math.floor(this.lastTs / 2000)) {
-            this.cleanupInvisibleSprites()
-        }
 
         this.lastTs = ts
         this.rafId = requestAnimationFrame(this.gameLoop)
